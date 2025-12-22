@@ -1,4 +1,4 @@
-﻿Imports System.Net.Sockets
+Imports System.Net.Sockets
 Imports System.Text
 Imports System.Globalization
 Imports System.Windows.Forms
@@ -70,7 +70,7 @@ Public Class FormMain
     Private Class ScheduleItem
         Public Property Id As Integer
         Public Property Enabled As Boolean
-        Public Property Mode As String ' DI / RTC / COMBINED
+        Public Property Mode As String ' DI / RTC / COMBINED / ANALOG / ANALOG_DI / ANALOG_RTC / ANALOG_DI_RTC
         Public Property DaysMask As Integer ' bit0=Mon..bit6=Sun
         Public Property TriggerDI As Integer
         Public Property Edge As String ' RISING / FALLING / BOTH
@@ -88,6 +88,17 @@ Public Class FormMain
         Public Property BuzzOn As Integer
         Public Property BuzzOff As Integer
         Public Property BuzzRep As Integer
+
+        ' NEW: Analog Trigger
+        Public Property AnalogEnable As Boolean
+        Public Property AnalogType As String ' VOLT / CURR
+        Public Property AnalogCh As Integer ' 1..2
+        Public Property AnalogOp As String ' ABOVE/BELOW/EQUAL/IN_RANGE
+        Public Property AnalogV1 As Integer ' mV or mA
+        Public Property AnalogV2 As Integer ' mV or mA
+        Public Property AnalogHys As Integer ' mV or mA
+        Public Property AnalogDbMs As Integer
+        Public Property AnalogTol As Integer
     End Class
 
     Private schedules As New Dictionary(Of Integer, ScheduleItem)()
@@ -109,19 +120,52 @@ Public Class FormMain
         Text = "C-Link A8R-M Configurator"
 
         txtIp.Text = "169.254.85.149"
-        txtPort.Text = "8080"
+        txtPort.Text = "5000"
 
         cboTempUnit.Items.AddRange(New Object() {"C", "F"})
         cboTempUnit.SelectedIndex = 0
 
         ' Schedules UI
-        cboSchedMode.Items.AddRange(New Object() {"DI", "RTC", "COMBINED"})
+        cboSchedMode.Items.Clear()
+        cboSchedMode.Items.AddRange(New Object() {
+            "DI",
+            "RTC",
+            "DI_RTC",
+            "ANALOG",
+            "ANALOG_DI",
+            "ANALOG_RTC",
+            "ANALOG_DI_RTC"
+        })
+        cboSchedMode.SelectedIndex = 0
+
+        ' Add after your other schedule combo init:
+        cboAnalogType.Items.Clear()
+        cboAnalogType.Items.AddRange(New Object() {"VOLT", "CURR"})
+        cboAnalogType.SelectedIndex = 0
+
+        cboAnalogCh.Items.Clear()
+        cboAnalogCh.Items.AddRange(New Object() {"1", "2"})
+        cboAnalogCh.SelectedIndex = 0
+
+        cboAnalogOp.Items.Clear()
+        cboAnalogOp.Items.AddRange(New Object() {"ABOVE", "BELOW", "EQUAL", "IN_RANGE"})
+        cboAnalogOp.SelectedIndex = 0
+
+        AddHandler cboAnalogOp.SelectedIndexChanged,
+            Sub()
+                Dim op = cboAnalogOp.SelectedItem.ToString().ToUpperInvariant()
+                txtAnalogV2.Enabled = (op = "IN_RANGE")
+                txtAnalogTol.Visible = (op = "EQUAL")
+                LblTol.Visible = (op = "EQUAL")
+            End Sub
+
+
         cboSchedMode.SelectedIndex = 0
 
         cboTrigDI.Items.AddRange(New Object() {"1", "2", "3", "4", "5", "6", "7", "8"})
         cboTrigDI.SelectedIndex = 0
 
-        cboEdge.Items.AddRange(New Object() {"RISING", "FALLING", "BOTH"})
+        cboEdge.Items.AddRange(New Object() {"RISING", "FALLING", "BOTH", "HIGH", "LOW"})
         cboEdge.SelectedIndex = 0
 
         cboRelayAction.Items.AddRange(New Object() {"ON", "OFF", "TOGGLE"})
@@ -1364,6 +1408,15 @@ Public Class FormMain
             it.BuzzOn = ToInt(GetTok(args, "BUZON"), 200)
             it.BuzzOff = ToInt(GetTok(args, "BUZOFF"), 200)
             it.BuzzRep = ToInt(GetTok(args, "BUZREP"), 5)
+            it.AnalogEnable = (ToInt(GetTok(args, "AEN"), 0) <> 0)
+            it.AnalogType = Nz(GetTok(args, "ATYPE"), "VOLT").ToUpperInvariant()
+            it.AnalogCh = ToInt(GetTok(args, "ACH"), 1)
+            it.AnalogOp = Nz(GetTok(args, "AOP"), "ABOVE").ToUpperInvariant()
+            it.AnalogV1 = ToInt(GetTok(args, "AV1"), 0)
+            it.AnalogV2 = ToInt(GetTok(args, "AV2"), 0)
+            it.AnalogHys = ToInt(GetTok(args, "AHYS"), 50)
+            it.AnalogDbMs = ToInt(GetTok(args, "ADBMS"), 200)
+            it.AnalogTol = ToInt(GetTok(args, "ATOL"), 50)
             If it.Id < 0 Then Return Nothing
             Return it
         Catch ex As Exception
@@ -1380,8 +1433,17 @@ Public Class FormMain
                 Dim s = kv.Value
                 Dim daysStr = DaysMaskToShort(s.DaysMask)
                 Dim windowStr = s.StartHHMM & "-" & s.EndHHMM
-                Dim trigStr = If(s.Mode = "DI" OrElse s.Mode = "COMBINED", $"DI{s.TriggerDI}/{s.Edge}", "RTC")
-                Dim actionsStr = $"REL({s.RelayAction}:{s.RelayMask}) DAC({s.Dac1mV},{s.Dac2mV}) BUZ({If(s.BuzzEnable, "Y", "N")})"
+                Dim trigStr = If(s.Mode = "DI" OrElse s.Mode = "DI_RTC", $"DI{s.TriggerDI}/{s.Edge}", "RTC")
+                Dim analogStr As String = "-"
+                If s.AnalogEnable Then
+                    analogStr = $"{s.AnalogType}{s.AnalogCh} {s.AnalogOp} {s.AnalogV1}"
+                    If s.AnalogOp = "IN_RANGE" Then analogStr &= $"..{s.AnalogV2}"
+                    analogStr &= $" H={s.AnalogHys} D={s.AnalogDbMs}"
+                    If s.AnalogOp = "EQUAL" Then analogStr &= $" T={s.AnalogTol}"
+                End If
+
+                Dim actionsStr = $"REL({s.RelayAction}:{s.RelayMask}) DAC({s.Dac1mV},{s.Dac2mV}) BUZ({If(s.BuzzEnable, "Y", "N")}) AN({analogStr})"
+
                 Dim li As New ListViewItem(s.Id.ToString())
                 li.SubItems.Add(If(s.Enabled, "1", "0"))
                 li.SubItems.Add(s.Mode)
@@ -1431,6 +1493,18 @@ Public Class FormMain
         txtBuzzOnMs.Text = it.BuzzOn.ToString()
         txtBuzzOffMs.Text = it.BuzzOff.ToString()
         txtBuzzRepeats.Text = it.BuzzRep.ToString()
+
+        'populate new analog editor fields
+        chkAnalogEnable.Checked = it.AnalogEnable
+        cboAnalogType.SelectedItem = If(it.AnalogType = "CURR", "CURR", "VOLT")
+        cboAnalogCh.SelectedItem = it.AnalogCh.ToString()
+        cboAnalogOp.SelectedItem = it.AnalogOp
+        txtAnalogV1.Text = it.AnalogV1.ToString()
+        txtAnalogV2.Text = it.AnalogV2.ToString()
+        txtAnalogHys.Text = it.AnalogHys.ToString()
+        txtAnalogDb.Text = it.AnalogDbMs.ToString()
+        txtAnalogTol.Text = it.AnalogTol.ToString()
+
     End Sub
 
     ' =========================
@@ -1466,6 +1540,29 @@ Public Class FormMain
             txtV2.Text = v2.ToString("0.000")
             txtI1.Text = i1.ToString("0.000")
             txtI2.Text = i2.ToString("0.000")
+
+            Dim aiVrange As Integer = ToInt(ExtractJsonNumber(json, "ai_vrange"), 5)
+
+            Dim vraw0 As Integer = CInt(GetArrayValue(json, "ai_v_raw", 0))
+            Dim vraw1 As Integer = CInt(GetArrayValue(json, "ai_v_raw", 1))
+            Dim iraw0 As Integer = CInt(GetArrayValue(json, "ai_i_raw", 0))
+            Dim iraw1 As Integer = CInt(GetArrayValue(json, "ai_i_raw", 1))
+
+            ' Decide what to display based on current editor selection
+            Dim atype = cboAnalogType.SelectedItem.ToString().ToUpperInvariant()
+            Dim ach As Integer = ToInt(cboAnalogCh.SelectedItem.ToString(), 1)
+            Dim idx As Integer = If(ach <= 1, 0, 1)
+
+            If atype = "VOLT" Then
+                Dim v As Double = GetArrayValue(json, "ai_v", idx)
+                Dim raw As Integer = If(idx = 0, vraw0, vraw1)
+                lblAnalogLive.Text = $"Live VOLT{ach}: raw={raw}  v={v:0.000}V  range={aiVrange}V"
+            Else
+                Dim mA As Double = GetArrayValue(json, "ai_i", idx)
+                Dim raw As Integer = If(idx = 0, iraw0, iraw1)
+                lblAnalogLive.Text = $"Live CURR{ach}: raw={raw}  i={mA:0.000}mA"
+            End If
+
 
             Dim mv0 As Integer = CInt(GetArrayValue(json, "dac_mv", 0))
             Dim mv1 As Integer = CInt(GetArrayValue(json, "dac_mv", 1))
@@ -1874,6 +1971,19 @@ Public Class FormMain
         txtBuzzOnMs.Text = "200"
         txtBuzzOffMs.Text = "200"
         txtBuzzRepeats.Text = "5"
+
+        chkAnalogEnable.Checked = False
+        cboAnalogType.SelectedItem = "VOLT"
+        cboAnalogCh.SelectedItem = "1"
+        cboAnalogOp.SelectedItem = "ABOVE"
+        txtAnalogV1.Text = "0"
+        txtAnalogV2.Text = "0"
+        txtAnalogHys.Text = "50"
+        txtAnalogDb.Text = "200"
+        txtAnalogTol.Text = "50"
+        txtAnalogTol.Visible = True
+        LblTol.Visible = True
+        txtAnalogV2.Enabled = True
     End Sub
 
     Private Function CaptureEditorToSchedule() As ScheduleItem
@@ -1906,6 +2016,17 @@ Public Class FormMain
         it.BuzzOff = ToInt(txtBuzzOffMs.Text.Trim(), 200)
         it.BuzzRep = ToInt(txtBuzzRepeats.Text.Trim(), 5)
 
+        'capture analog trigger settings
+        it.AnalogEnable = chkAnalogEnable.Checked
+        it.AnalogType = cboAnalogType.SelectedItem.ToString().ToUpperInvariant()
+        it.AnalogCh = ToInt(cboAnalogCh.SelectedItem.ToString(), 1)
+        it.AnalogOp = cboAnalogOp.SelectedItem.ToString().ToUpperInvariant()
+        it.AnalogV1 = ToInt(txtAnalogV1.Text.Trim(), 0)
+        it.AnalogV2 = ToInt(txtAnalogV2.Text.Trim(), 0)
+        it.AnalogHys = ToInt(txtAnalogHys.Text.Trim(), 50)
+        it.AnalogDbMs = ToInt(txtAnalogDb.Text.Trim(), 200)
+        it.AnalogTol = ToInt(txtAnalogTol.Text.Trim(), 50)
+
         Return it
     End Function
 
@@ -1915,6 +2036,7 @@ Public Class FormMain
                   $"RELMASK={it.RelayMask} RELACT={it.RelayAction} " &
                   $"DAC1MV={it.Dac1mV} DAC2MV={it.Dac2mV} DAC1R={it.Dac1R} DAC2R={it.Dac2R} " &
                   $"BUZEN={If(it.BuzzEnable, 1, 0)} BUZFREQ={it.BuzzFreq} BUZON={it.BuzzOn} BUZOFF={it.BuzzOff} BUZREP={it.BuzzRep}"
+        cmd &= $" AEN={If(it.AnalogEnable, 1, 0)} ATYPE={it.AnalogType} ACH={it.AnalogCh} AOP={it.AnalogOp} AV1={it.AnalogV1} AV2={it.AnalogV2} AHYS={it.AnalogHys} ADBMS={it.AnalogDbMs} ATOL={it.AnalogTol}"
         Return cmd
     End Function
 
@@ -2130,5 +2252,7 @@ Public Class FormMain
         If btnSerialApplyIpPort IsNot Nothing Then btnSerialApplyIpPort.Enabled = False
     End Sub
 
+    Private Sub chkAnalogEnable_CheckedChanged(sender As Object, e As EventArgs) Handles chkAnalogEnable.CheckedChanged
 
+    End Sub
 End Class
