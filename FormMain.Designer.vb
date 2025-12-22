@@ -1,4 +1,4 @@
-﻿<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()>
+<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()>
 Partial Class FormMain
     Inherits System.Windows.Forms.Form
 
@@ -158,6 +158,17 @@ Partial Class FormMain
         Me.btnSchedDisable = New System.Windows.Forms.Button()
         Me.btnSchedApply = New System.Windows.Forms.Button()
         Me.lblSchedStatus = New System.Windows.Forms.Label()
+        Me.grpAnalogTrig = New System.Windows.Forms.GroupBox()
+        Me.chkAnalogEnable = New System.Windows.Forms.CheckBox()
+        Me.cboAnalogType = New System.Windows.Forms.ComboBox()
+        Me.cboAnalogCh = New System.Windows.Forms.ComboBox()
+        Me.cboAnalogOp = New System.Windows.Forms.ComboBox()
+        Me.txtAnalogV1 = New System.Windows.Forms.TextBox()
+        Me.txtAnalogV2 = New System.Windows.Forms.TextBox()
+        Me.txtAnalogHys = New System.Windows.Forms.TextBox()
+        Me.txtAnalogDb = New System.Windows.Forms.TextBox()
+        Me.txtAnalogTol = New System.Windows.Forms.TextBox()
+        Me.lblAnalogLive = New System.Windows.Forms.Label()
         Me.tabPageSettings = New System.Windows.Forms.TabPage()
         Me.grpExistingSettings = New System.Windows.Forms.GroupBox()
         Me.btnSettingsRefresh = New System.Windows.Forms.Button()
@@ -212,6 +223,11 @@ Partial Class FormMain
         Me.cboComPort = New System.Windows.Forms.ComboBox()
         Me.lblComPort = New System.Windows.Forms.Label()
         Me.lblSerialHint = New System.Windows.Forms.Label()
+        Me.LblDebounce = New System.Windows.Forms.Label()
+        Me.LblTol = New System.Windows.Forms.Label()
+        Me.Label12 = New System.Windows.Forms.Label()
+        Me.Label13 = New System.Windows.Forms.Label()
+        Me.Label14 = New System.Windows.Forms.Label()
         Me.grpNet.SuspendLayout()
         Me.grpRelays.SuspendLayout()
         Me.grpDI.SuspendLayout()
@@ -230,6 +246,7 @@ Partial Class FormMain
         Me.grpSchedRelays.SuspendLayout()
         Me.grpSchedDac.SuspendLayout()
         Me.grpSchedBuzzer.SuspendLayout()
+        Me.grpAnalogTrig.SuspendLayout()
         Me.tabPageSettings.SuspendLayout()
         Me.grpExistingSettings.SuspendLayout()
         Me.grpUserSettings.SuspendLayout()
@@ -921,7 +938,7 @@ Partial Class FormMain
         Me.tabMain.Location = New System.Drawing.Point(0, 0)
         Me.tabMain.Name = "tabMain"
         Me.tabMain.SelectedIndex = 0
-        Me.tabMain.Size = New System.Drawing.Size(592, 670)
+        Me.tabMain.Size = New System.Drawing.Size(592, 699)
         Me.tabMain.TabIndex = 100
         '
         'tabPageDashboard
@@ -938,7 +955,7 @@ Partial Class FormMain
         Me.tabPageDashboard.Controls.Add(Me.txtLog)
         Me.tabPageDashboard.Location = New System.Drawing.Point(4, 22)
         Me.tabPageDashboard.Name = "tabPageDashboard"
-        Me.tabPageDashboard.Size = New System.Drawing.Size(584, 644)
+        Me.tabPageDashboard.Size = New System.Drawing.Size(584, 673)
         Me.tabPageDashboard.TabIndex = 0
         Me.tabPageDashboard.Text = "Dashboard"
         Me.tabPageDashboard.UseVisualStyleBackColor = True
@@ -948,7 +965,7 @@ Partial Class FormMain
         Me.tabPageSchedule.Controls.Add(Me.grpSchedule)
         Me.tabPageSchedule.Location = New System.Drawing.Point(4, 22)
         Me.tabPageSchedule.Name = "tabPageSchedule"
-        Me.tabPageSchedule.Size = New System.Drawing.Size(584, 644)
+        Me.tabPageSchedule.Size = New System.Drawing.Size(584, 673)
         Me.tabPageSchedule.TabIndex = 1
         Me.tabPageSchedule.Text = "Schedule"
         Me.tabPageSchedule.UseVisualStyleBackColor = True
@@ -982,9 +999,10 @@ Partial Class FormMain
         Me.grpSchedule.Controls.Add(Me.btnSchedDisable)
         Me.grpSchedule.Controls.Add(Me.btnSchedApply)
         Me.grpSchedule.Controls.Add(Me.lblSchedStatus)
+        Me.grpSchedule.Controls.Add(Me.grpAnalogTrig)
         Me.grpSchedule.Location = New System.Drawing.Point(12, 12)
         Me.grpSchedule.Name = "grpSchedule"
-        Me.grpSchedule.Size = New System.Drawing.Size(556, 610)
+        Me.grpSchedule.Size = New System.Drawing.Size(556, 655)
         Me.grpSchedule.TabIndex = 200
         Me.grpSchedule.TabStop = False
         Me.grpSchedule.Text = "Scheduler"
@@ -1062,7 +1080,7 @@ Partial Class FormMain
         Me.cboSchedMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
         Me.cboSchedMode.Location = New System.Drawing.Point(110, 206)
         Me.cboSchedMode.Name = "cboSchedMode"
-        Me.cboSchedMode.Size = New System.Drawing.Size(220, 21)
+        Me.cboSchedMode.Size = New System.Drawing.Size(162, 21)
         Me.cboSchedMode.TabIndex = 11
         '
         'chkSchedEnabled
@@ -1258,7 +1276,7 @@ Partial Class FormMain
         Me.grpSchedRelays.Controls.Add(Me.cboRelayAction)
         Me.grpSchedRelays.Location = New System.Drawing.Point(16, 345)
         Me.grpSchedRelays.Name = "grpSchedRelays"
-        Me.grpSchedRelays.Size = New System.Drawing.Size(520, 70)
+        Me.grpSchedRelays.Size = New System.Drawing.Size(520, 54)
         Me.grpSchedRelays.TabIndex = 22
         Me.grpSchedRelays.TabStop = False
         Me.grpSchedRelays.Text = "Digital Outputs (Relays) Action"
@@ -1338,9 +1356,9 @@ Partial Class FormMain
         Me.grpSchedDac.Controls.Add(Me.cboDac1Range)
         Me.grpSchedDac.Controls.Add(Me.lblDac2Range)
         Me.grpSchedDac.Controls.Add(Me.cboDac2Range)
-        Me.grpSchedDac.Location = New System.Drawing.Point(16, 420)
+        Me.grpSchedDac.Location = New System.Drawing.Point(16, 477)
         Me.grpSchedDac.Name = "grpSchedDac"
-        Me.grpSchedDac.Size = New System.Drawing.Size(520, 70)
+        Me.grpSchedDac.Size = New System.Drawing.Size(520, 54)
         Me.grpSchedDac.TabIndex = 23
         Me.grpSchedDac.TabStop = False
         Me.grpSchedDac.Text = "Analog Outputs (DAC)"
@@ -1424,7 +1442,7 @@ Partial Class FormMain
         Me.grpSchedBuzzer.Controls.Add(Me.txtBuzzOffMs)
         Me.grpSchedBuzzer.Controls.Add(Me.lblBuzzRepeats)
         Me.grpSchedBuzzer.Controls.Add(Me.txtBuzzRepeats)
-        Me.grpSchedBuzzer.Location = New System.Drawing.Point(16, 495)
+        Me.grpSchedBuzzer.Location = New System.Drawing.Point(15, 536)
         Me.grpSchedBuzzer.Name = "grpSchedBuzzer"
         Me.grpSchedBuzzer.Size = New System.Drawing.Size(520, 55)
         Me.grpSchedBuzzer.TabIndex = 24
@@ -1546,7 +1564,7 @@ Partial Class FormMain
         '
         'btnSchedQuery
         '
-        Me.btnSchedQuery.Location = New System.Drawing.Point(280, 555)
+        Me.btnSchedQuery.Location = New System.Drawing.Point(350, 603)
         Me.btnSchedQuery.Name = "btnSchedQuery"
         Me.btnSchedQuery.Size = New System.Drawing.Size(120, 28)
         Me.btnSchedQuery.TabIndex = 32
@@ -1554,7 +1572,7 @@ Partial Class FormMain
         '
         'btnSchedDisable
         '
-        Me.btnSchedDisable.Location = New System.Drawing.Point(148, 555)
+        Me.btnSchedDisable.Location = New System.Drawing.Point(218, 603)
         Me.btnSchedDisable.Name = "btnSchedDisable"
         Me.btnSchedDisable.Size = New System.Drawing.Size(120, 28)
         Me.btnSchedDisable.TabIndex = 31
@@ -1562,7 +1580,7 @@ Partial Class FormMain
         '
         'btnSchedApply
         '
-        Me.btnSchedApply.Location = New System.Drawing.Point(16, 555)
+        Me.btnSchedApply.Location = New System.Drawing.Point(86, 603)
         Me.btnSchedApply.Name = "btnSchedApply"
         Me.btnSchedApply.Size = New System.Drawing.Size(120, 28)
         Me.btnSchedApply.TabIndex = 30
@@ -1571,11 +1589,118 @@ Partial Class FormMain
         'lblSchedStatus
         '
         Me.lblSchedStatus.AutoSize = True
-        Me.lblSchedStatus.Location = New System.Drawing.Point(16, 590)
+        Me.lblSchedStatus.Location = New System.Drawing.Point(16, 638)
         Me.lblSchedStatus.Name = "lblSchedStatus"
         Me.lblSchedStatus.Size = New System.Drawing.Size(78, 13)
         Me.lblSchedStatus.TabIndex = 33
         Me.lblSchedStatus.Text = "Scheduler: n/a"
+        '
+        'grpAnalogTrig
+        '
+        Me.grpAnalogTrig.Controls.Add(Me.Label14)
+        Me.grpAnalogTrig.Controls.Add(Me.Label13)
+        Me.grpAnalogTrig.Controls.Add(Me.Label12)
+        Me.grpAnalogTrig.Controls.Add(Me.LblTol)
+        Me.grpAnalogTrig.Controls.Add(Me.LblDebounce)
+        Me.grpAnalogTrig.Controls.Add(Me.chkAnalogEnable)
+        Me.grpAnalogTrig.Controls.Add(Me.cboAnalogType)
+        Me.grpAnalogTrig.Controls.Add(Me.cboAnalogCh)
+        Me.grpAnalogTrig.Controls.Add(Me.cboAnalogOp)
+        Me.grpAnalogTrig.Controls.Add(Me.txtAnalogV1)
+        Me.grpAnalogTrig.Controls.Add(Me.txtAnalogV2)
+        Me.grpAnalogTrig.Controls.Add(Me.txtAnalogHys)
+        Me.grpAnalogTrig.Controls.Add(Me.txtAnalogDb)
+        Me.grpAnalogTrig.Controls.Add(Me.txtAnalogTol)
+        Me.grpAnalogTrig.Controls.Add(Me.lblAnalogLive)
+        Me.grpAnalogTrig.Location = New System.Drawing.Point(15, 404)
+        Me.grpAnalogTrig.Name = "grpAnalogTrig"
+        Me.grpAnalogTrig.Size = New System.Drawing.Size(520, 68)
+        Me.grpAnalogTrig.TabIndex = 25
+        Me.grpAnalogTrig.TabStop = False
+        Me.grpAnalogTrig.Text = "Analog Trigger (Voltage/Current)"
+        '
+        'chkAnalogEnable
+        '
+        Me.chkAnalogEnable.AutoSize = True
+        Me.chkAnalogEnable.Location = New System.Drawing.Point(16, 24)
+        Me.chkAnalogEnable.Name = "chkAnalogEnable"
+        Me.chkAnalogEnable.Size = New System.Drawing.Size(59, 17)
+        Me.chkAnalogEnable.TabIndex = 0
+        Me.chkAnalogEnable.Text = "Enable"
+        Me.chkAnalogEnable.UseVisualStyleBackColor = True
+        '
+        'cboAnalogType
+        '
+        Me.cboAnalogType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboAnalogType.Location = New System.Drawing.Point(90, 20)
+        Me.cboAnalogType.Name = "cboAnalogType"
+        Me.cboAnalogType.Size = New System.Drawing.Size(64, 21)
+        Me.cboAnalogType.TabIndex = 1
+        '
+        'cboAnalogCh
+        '
+        Me.cboAnalogCh.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboAnalogCh.Location = New System.Drawing.Point(160, 20)
+        Me.cboAnalogCh.Name = "cboAnalogCh"
+        Me.cboAnalogCh.Size = New System.Drawing.Size(32, 21)
+        Me.cboAnalogCh.TabIndex = 2
+        '
+        'cboAnalogOp
+        '
+        Me.cboAnalogOp.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboAnalogOp.Location = New System.Drawing.Point(198, 20)
+        Me.cboAnalogOp.Name = "cboAnalogOp"
+        Me.cboAnalogOp.Size = New System.Drawing.Size(80, 21)
+        Me.cboAnalogOp.TabIndex = 3
+        '
+        'txtAnalogV1
+        '
+        Me.txtAnalogV1.Location = New System.Drawing.Point(284, 20)
+        Me.txtAnalogV1.Name = "txtAnalogV1"
+        Me.txtAnalogV1.Size = New System.Drawing.Size(45, 20)
+        Me.txtAnalogV1.TabIndex = 4
+        Me.txtAnalogV1.Text = "0"
+        '
+        'txtAnalogV2
+        '
+        Me.txtAnalogV2.Location = New System.Drawing.Point(335, 19)
+        Me.txtAnalogV2.Name = "txtAnalogV2"
+        Me.txtAnalogV2.Size = New System.Drawing.Size(45, 20)
+        Me.txtAnalogV2.TabIndex = 5
+        Me.txtAnalogV2.Text = "0"
+        '
+        'txtAnalogHys
+        '
+        Me.txtAnalogHys.Location = New System.Drawing.Point(386, 20)
+        Me.txtAnalogHys.Name = "txtAnalogHys"
+        Me.txtAnalogHys.Size = New System.Drawing.Size(35, 20)
+        Me.txtAnalogHys.TabIndex = 6
+        Me.txtAnalogHys.Text = "50"
+        '
+        'txtAnalogDb
+        '
+        Me.txtAnalogDb.Location = New System.Drawing.Point(475, 16)
+        Me.txtAnalogDb.Name = "txtAnalogDb"
+        Me.txtAnalogDb.Size = New System.Drawing.Size(35, 20)
+        Me.txtAnalogDb.TabIndex = 7
+        Me.txtAnalogDb.Text = "200"
+        '
+        'txtAnalogTol
+        '
+        Me.txtAnalogTol.Location = New System.Drawing.Point(476, 42)
+        Me.txtAnalogTol.Name = "txtAnalogTol"
+        Me.txtAnalogTol.Size = New System.Drawing.Size(35, 20)
+        Me.txtAnalogTol.TabIndex = 8
+        Me.txtAnalogTol.Text = "50"
+        '
+        'lblAnalogLive
+        '
+        Me.lblAnalogLive.AutoSize = True
+        Me.lblAnalogLive.Location = New System.Drawing.Point(5, 49)
+        Me.lblAnalogLive.Name = "lblAnalogLive"
+        Me.lblAnalogLive.Size = New System.Drawing.Size(156, 13)
+        Me.lblAnalogLive.TabIndex = 9
+        Me.lblAnalogLive.Text = "Live: (waiting for SNAPJSON...)"
         '
         'tabPageSettings
         '
@@ -1584,7 +1709,7 @@ Partial Class FormMain
         Me.tabPageSettings.Controls.Add(Me.grpSerial)
         Me.tabPageSettings.Location = New System.Drawing.Point(4, 22)
         Me.tabPageSettings.Name = "tabPageSettings"
-        Me.tabPageSettings.Size = New System.Drawing.Size(584, 644)
+        Me.tabPageSettings.Size = New System.Drawing.Size(584, 673)
         Me.tabPageSettings.TabIndex = 2
         Me.tabPageSettings.Text = "Settings"
         Me.tabPageSettings.UseVisualStyleBackColor = True
@@ -2121,9 +2246,57 @@ Partial Class FormMain
         Me.lblSerialHint.TabIndex = 0
         Me.lblSerialHint.Text = "Use SERIALNET on ESP32 to print network config."
         '
+        'LblDebounce
+        '
+        Me.LblDebounce.AutoSize = True
+        Me.LblDebounce.Location = New System.Drawing.Point(434, 20)
+        Me.LblDebounce.Name = "LblDebounce"
+        Me.LblDebounce.Size = New System.Drawing.Size(37, 13)
+        Me.LblDebounce.TabIndex = 34
+        Me.LblDebounce.Text = "DBNS"
+        '
+        'LblTol
+        '
+        Me.LblTol.AutoSize = True
+        Me.LblTol.Location = New System.Drawing.Point(434, 45)
+        Me.LblTol.Name = "LblTol"
+        Me.LblTol.Size = New System.Drawing.Size(28, 13)
+        Me.LblTol.TabIndex = 35
+        Me.LblTol.Text = "TOL"
+        '
+        'Label12
+        '
+        Me.Label12.AutoSize = True
+        Me.Label12.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label12.Location = New System.Drawing.Point(288, 42)
+        Me.Label12.Name = "Label12"
+        Me.Label12.Size = New System.Drawing.Size(34, 13)
+        Me.Label12.TabIndex = 36
+        Me.Label12.Text = "SET1"
+        '
+        'Label13
+        '
+        Me.Label13.AutoSize = True
+        Me.Label13.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label13.Location = New System.Drawing.Point(337, 42)
+        Me.Label13.Name = "Label13"
+        Me.Label13.Size = New System.Drawing.Size(34, 13)
+        Me.Label13.TabIndex = 37
+        Me.Label13.Text = "SET2"
+        '
+        'Label14
+        '
+        Me.Label14.AutoSize = True
+        Me.Label14.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label14.Location = New System.Drawing.Point(386, 42)
+        Me.Label14.Name = "Label14"
+        Me.Label14.Size = New System.Drawing.Size(29, 13)
+        Me.Label14.TabIndex = 38
+        Me.Label14.Text = "HYS"
+        '
         'FormMain
         '
-        Me.ClientSize = New System.Drawing.Size(592, 670)
+        Me.ClientSize = New System.Drawing.Size(592, 701)
         Me.Controls.Add(Me.tabMain)
         Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
         Me.Name = "FormMain"
@@ -2161,6 +2334,8 @@ Partial Class FormMain
         Me.grpSchedDac.PerformLayout()
         Me.grpSchedBuzzer.ResumeLayout(False)
         Me.grpSchedBuzzer.PerformLayout()
+        Me.grpAnalogTrig.ResumeLayout(False)
+        Me.grpAnalogTrig.PerformLayout()
         Me.tabPageSettings.ResumeLayout(False)
         Me.grpExistingSettings.ResumeLayout(False)
         Me.grpExistingSettings.PerformLayout()
@@ -2278,6 +2453,19 @@ Partial Class FormMain
     Friend WithEvents lblBuzzRepeats As Label
     Friend WithEvents txtBuzzRepeats As TextBox
 
+    ' ===== NEW Analog Trigger Controls =====
+    Friend WithEvents grpAnalogTrig As GroupBox
+    Friend WithEvents chkAnalogEnable As CheckBox
+    Friend WithEvents cboAnalogType As ComboBox
+    Friend WithEvents cboAnalogCh As ComboBox
+    Friend WithEvents cboAnalogOp As ComboBox
+    Friend WithEvents txtAnalogV1 As TextBox
+    Friend WithEvents txtAnalogV2 As TextBox
+    Friend WithEvents txtAnalogHys As TextBox
+    Friend WithEvents txtAnalogDb As TextBox
+    Friend WithEvents txtAnalogTol As TextBox
+    Friend WithEvents lblAnalogLive As Label
+
     Friend WithEvents btnSchedApply As Button
     Friend WithEvents btnSchedDisable As Button
     Friend WithEvents btnSchedQuery As Button
@@ -2381,5 +2569,9 @@ Partial Class FormMain
     Friend WithEvents lblSerialStatus As Label
     Friend WithEvents txtSerialLog As TextBox
     Friend WithEvents btnSerialApplyIpPort As Button
-
+    Friend WithEvents LblDebounce As Label
+    Friend WithEvents Label13 As Label
+    Friend WithEvents Label12 As Label
+    Friend WithEvents LblTol As Label
+    Friend WithEvents Label14 As Label
 End Class
