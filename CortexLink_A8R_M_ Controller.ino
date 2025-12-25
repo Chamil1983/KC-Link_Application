@@ -1,4 +1,4 @@
-﻿#include <Arduino.h>
+#include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -12,6 +12,7 @@
 #include "src/DHT_Sensors.h"
 #include "src/RTCManager.h"
 #include "src/EthernetDriver.h"
+#include "src/ModbusComm.h"
 
 // ======================================================================
 // GLOBAL DRIVER INSTANCES
@@ -23,6 +24,9 @@ DHTSensors           g_dht;
 RTCManager& g_rtc = rtcManager;
 EthernetDriver& g_eth = ethernet;
 DigitalInputDriver& g_di = digitalInputs;
+
+// ===== NEW (MODBUS) =====
+ModbusComm           g_modbus;
 
 // ======================================================================
 // PREFERENCES
@@ -52,6 +56,22 @@ static const char* KEY_ETH_DNS_CUR = "eth_dns_cur";
 
 // NEW: analog input voltage range config (software scaling only)
 static const char* KEY_AI_VRANGE = "ai_vrng"; // 5 or 10
+
+// ===== NEW (MODBUS prefs) =====
+static const char* PREF_NS_MB = "mbcfg";
+static const char* KEY_MB_ENABLED = "en";      // bool
+static const char* KEY_MB_SLAVEID = "sid";     // u8
+static const char* KEY_MB_BAUD = "baud";       // u32
+static const char* KEY_MB_PARITY = "par";      // u8 0=N 1=E 2=O
+static const char* KEY_MB_STOPBITS = "sb";     // u8 1 or 2
+static const char* KEY_MB_DATABITS = "db";     // u8 7 or 8
+
+// Serial settings prefs namespace/keys (NEW)
+static const char* PREF_NS_SER = "sercfg";
+static const char* KEY_SER_BAUD = "baud";
+static const char* KEY_SER_PAR = "par";   // 0=N 1=O 2=E
+static const char* KEY_SER_SB = "sb";    // 1/2
+static const char* KEY_SER_DB = "db";    // 7/8
 
 // Scheduler prefs (fixed maximum number of schedules)
 static const uint8_t  SCHED_MAX = 8;
@@ -232,9 +252,73 @@ static const char* KEY_YEAR = "year";
 
 static const char* FW_VERSION_STR = "1.0.0";
 static const char* HW_VERSION_STR = "A8R-M-REV1";
-static const char* MANUFACTURER_STR = "Microcode Engineerig";
+static const char* MANUFACTURER_STR = "Microcode Engineering";
 
+// ======================================================================
+// ===== MODBUS REGISTER STORAGE (mirrors MODBUS_Test.ino style) =====
+// ======================================================================
+static uint16_t mb_inputRegs[16] = { 0 };   // digital inputs
+static uint16_t mb_relayRegs[8] = { 0 };    // relay outputs logical 0/1
+static uint16_t mb_analogRegs[8] = { 0 };   // raw/scaled pairs for 2V + 2I => 8 regs
+static uint16_t mb_tempRegs[8] = { 0 };
+static uint16_t mb_humRegs[8] = { 0 };
+static uint16_t mb_ds18Regs[8] = { 0 };
+static uint16_t mb_dacRegs[4] = { 0 };      // 0 raw0,1 raw1,2 volts*100 ch0,3 volts*100 ch1
+static uint16_t mb_rtcRegs[8] = { 0 };
+
+// ===== NEW: extra holding-register storage =====
+static uint16_t mb_sysInfoRegs[57] = { 0 }; // 100..156
+static uint16_t mb_netInfoRegs[50] = { 0 }; // 170..219
+static uint16_t mb_mbSetRegs[5] = { 0 }; // 230..234
+static uint16_t mb_serSetRegs[4] = { 0 }; // 240..243
+static uint16_t mb_buzRegs[6] = { 0 }; // 250..255
+
+// MODBUS settings (runtime)
+struct ModbusSettings {
+    bool enabled = true;
+    uint8_t slaveId = 9600;
+    uint32_t baud = 3;
+    uint8_t dataBits = 8;     // 7 or 8
+    uint8_t parity = 0;       // 0=N 1=E 2=O
+    uint8_t stopBits = 1;     // 1 or 2
+} g_mbCfg;
+
+struct SerialSettings {
+  uint32_t baud = 115200;
+  uint8_t dataBits = 8;
+  uint8_t parity = 0;
+  uint8_t stopBits = 1;
+} g_serCfg;
+
+
+// Shared baud table indices for BOTH Modbus RTU and Serial settings registers.
+// We store *index* in Modbus HR registers (uint16), not raw baud.
+static const uint32_t BAUD_TABLE[] = {
+  1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600
+};
+static const uint8_t BAUD_TABLE_COUNT = sizeof(BAUD_TABLE) / sizeof(BAUD_TABLE[0]);
+
+static uint8_t baudToIndex(uint32_t baud) {
+    for (uint8_t i = 0; i < BAUD_TABLE_COUNT; i++) {
+        if (BAUD_TABLE[i] == baud) return i;
+    }
+    // default to 9600 for Modbus / 115200 for Serial depends on usage, but we keep a safe default.
+    // Here: 9600 index if present, else 0.
+    for (uint8_t i = 0; i < BAUD_TABLE_COUNT; i++) {
+        if (BAUD_TABLE[i] == 9600) return i;
+    }
+    return 0;
+}
+
+static uint32_t indexToBaud(uint16_t idx, uint32_t fallback) {
+    if (idx < BAUD_TABLE_COUNT) return BAUD_TABLE[(uint8_t)idx];
+    return fallback;
+}
+
+
+// ======================================================================
 // Helper: format chip unique MAC
+// ======================================================================
 static String espMacToString() {
     uint64_t mac = ESP.getEfuseMac();
     uint8_t b[6];
@@ -312,9 +396,31 @@ static void hwInfoEnsureDefaults();
 static void hwInfoPrintBoardInfoSerial();
 static void hwInfoPrintBoardInfoTcp();
 
+// ===== NEW (MODBUS helpers) =====
+static void loadModbusConfig();
+static void saveModbusConfig();
+static void initModbus();               // keep same name as MODBUS_Test.ino
+static void updateModbusData();         // refresh mb_* arrays from drivers
+
+// MODBUS callbacks (pattern from MODBUS_Test.ino)
+static uint16_t mbInputsCallback(TRegister* reg, uint16_t val);
+static uint16_t mbDiscreteInputsCallback(TRegister* reg, uint16_t val);
+static uint16_t mbRelaysGet(TRegister* reg, uint16_t val);
+static uint16_t mbRelaysSet(TRegister* reg, uint16_t val);
+static uint16_t mbRelaysCoilGet(TRegister* reg, uint16_t val);
+static uint16_t mbRelaysCoilSet(TRegister* reg, uint16_t val);
+static uint16_t mbAnalogCallback(TRegister* reg, uint16_t val);
+static uint16_t mbDacGet(TRegister* reg, uint16_t val);
+static uint16_t mbDacSet(TRegister* reg, uint16_t val);
+static uint16_t mbRtcGet(TRegister* reg, uint16_t val);
+static uint16_t mbRtcSet(TRegister* reg, uint16_t val);
+
 // ======================================================================
 // Utility
 // ======================================================================
+
+
+
 String ipToString(IPAddress ip) {
     char b[24];
     snprintf(b, sizeof(b), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
@@ -388,6 +494,515 @@ static void saveAnalogConfig(uint8_t vRange) {
     g_prefs.putUChar(KEY_AI_VRANGE, vRange);
     g_prefs.end();
 }
+
+// ======================================================================
+// ===== MODBUS CONFIG (Preferences) =====
+// ======================================================================
+static void loadModbusConfig() {
+    g_prefs.begin(PREF_NS_MB, true);
+    g_mbCfg.enabled = g_prefs.getBool(KEY_MB_ENABLED, true);
+    g_mbCfg.slaveId = g_prefs.getUChar(KEY_MB_SLAVEID, 1);
+    g_mbCfg.baud = g_prefs.getULong(KEY_MB_BAUD, 9600);
+
+    g_mbCfg.parity = g_prefs.getUChar(KEY_MB_PARITY, 0);
+    g_mbCfg.stopBits = g_prefs.getUChar(KEY_MB_STOPBITS, 1);
+    g_mbCfg.dataBits = g_prefs.getUChar(KEY_MB_DATABITS, 8);
+    g_prefs.end();
+
+    if (g_mbCfg.slaveId < 1) g_mbCfg.slaveId = 1;
+    if (g_mbCfg.slaveId > 247) g_mbCfg.slaveId = 1;
+    if (g_mbCfg.baud < 1200) g_mbCfg.baud = 9600;
+    if (g_mbCfg.baud > 2000000) g_mbCfg.baud = 9600;
+    if (g_mbCfg.parity > 2) g_mbCfg.parity = 0;
+    if (g_mbCfg.stopBits != 2) g_mbCfg.stopBits = 1;
+    if (g_mbCfg.dataBits != 7) g_mbCfg.dataBits = 8; // default 8 unless explicitly 7
+}
+
+static void saveModbusConfig() {
+    g_prefs.begin(PREF_NS_MB, false);
+    g_prefs.putBool(KEY_MB_ENABLED, g_mbCfg.enabled);
+    g_prefs.putUChar(KEY_MB_SLAVEID, g_mbCfg.slaveId);
+    g_prefs.putULong(KEY_MB_BAUD, g_mbCfg.baud);
+    g_prefs.putUChar(KEY_MB_PARITY, g_mbCfg.parity);
+    g_prefs.putUChar(KEY_MB_STOPBITS, g_mbCfg.stopBits);
+    g_prefs.putUChar(KEY_MB_DATABITS, g_mbCfg.dataBits);
+    g_prefs.end();
+}
+
+// ===== Helpers: pack/unpack 2 ASCII bytes per register =====
+static inline uint16_t pack2(const char a, const char b) {
+    return ((uint16_t)(uint8_t)a << 8) | (uint16_t)(uint8_t)b;
+}
+static inline void writePackedStringToRegs(uint16_t* base, uint16_t regCount, const String& s) {
+    // regCount registers => regCount*2 chars max
+    const uint16_t maxChars = regCount * 2;
+    for (uint16_t i = 0; i < regCount; i++) base[i] = 0;
+
+    for (uint16_t i = 0; i < maxChars; i += 2) {
+        char c1 = (i < s.length()) ? s[i] : '\0';
+        char c2 = (i + 1 < s.length()) ? s[i + 1] : '\0';
+        base[i / 2] = pack2(c1, c2);
+    }
+}
+static inline String readPackedStringFromRegs(const uint16_t* base, uint16_t regCount) {
+    String out;
+    out.reserve(regCount * 2);
+    for (uint16_t i = 0; i < regCount; i++) {
+        char c1 = (char)((base[i] >> 8) & 0xFF);
+        char c2 = (char)(base[i] & 0xFF);
+        if (c1) out += c1;
+        if (c2) out += c2;
+    }
+    out.trim();
+    return out;
+}
+
+static void refreshSysInfoRegs() {
+    // Read from hwinfo prefs + runtime MAC
+    g_prefs.begin(PREF_NS_HWINFO, true);
+    String board = g_prefs.getString(KEY_BOARD_NAME, "KC-Link A8R-M");
+    String sn = g_prefs.getString(KEY_BOARD_SERIAL, "");
+    String mfg = g_prefs.getString(KEY_MANUFACTURER, MANUFACTURER_STR);
+    String fw = g_prefs.getString(KEY_FW_VER, FW_VERSION_STR);
+    String hw = g_prefs.getString(KEY_HW_VER, HW_VERSION_STR);
+    String yearS = g_prefs.getString(KEY_YEAR, "2025");
+    g_prefs.end();
+
+    // Enforce max lengths per map (prevents confusing truncations)
+    if (board.length() > 32) board = board.substring(0, 32);
+    if (sn.length() > 32) sn = sn.substring(0, 32);
+    if (mfg.length() > 16) mfg = mfg.substring(0, 16);
+    if (fw.length() > 8) fw = fw.substring(0, 8);
+    if (hw.length() > 8) hw = hw.substring(0, 8);
+
+    String mac = espMacToString(); // "AA:BB:CC:DD:EE:FF" (17 chars), but your map says 16 chars.
+    // Your map is 16 chars. "AA:BB:CC:DD:EE:FF" is 17 including all colons.
+    // So we must truncate to 16 (it will lose the last char). Better alternative:
+    // store without last colon segment? But requirement says it fits; it doesn't in 16.
+    // Best within your constraints: store "AA:BB:CC:DD:EE:" (16) OR store without separators (12).
+    // We'll store 16-char truncated so VB displays consistently:
+    if (mac.length() > 16) mac = mac.substring(0, 16);
+
+    // Layout offsets inside mb_sysInfoRegs (reg100 base):
+    writePackedStringToRegs(&mb_sysInfoRegs[0], 16, board);  // 100..115
+    writePackedStringToRegs(&mb_sysInfoRegs[16], 16, sn);    // 116..131
+    writePackedStringToRegs(&mb_sysInfoRegs[32], 8, mfg);    // 132..139
+    writePackedStringToRegs(&mb_sysInfoRegs[40], 8, mac);    // 140..147
+    writePackedStringToRegs(&mb_sysInfoRegs[48], 4, fw);     // 148..151
+    writePackedStringToRegs(&mb_sysInfoRegs[52], 4, hw);     // 152..155
+
+    uint16_t year = (uint16_t)yearS.toInt();
+    if (year < 1970 || year > 2100) year = 2025;
+    mb_sysInfoRegs[56] = year; // 156
+}
+
+
+static void refreshNetInfoRegs() {
+    // Read prefs + runtime (prefer runtime)
+    g_prefs.begin(PREF_NS_NET, true);
+    bool dhcp = g_prefs.getBool(KEY_ETH_DHCP, true);
+    String ipPref = g_prefs.getString(KEY_ETH_IP, "");
+    String maskPref = g_prefs.getString(KEY_ETH_MASK, "255.255.255.0");
+    String gwPref = g_prefs.getString(KEY_ETH_GW, "");
+    String dnsPref = g_prefs.getString(KEY_ETH_DNS, "8.8.8.8");
+    uint16_t port = g_prefs.getUShort(KEY_TCP_PORT, 5000);
+    String apS = g_prefs.getString(KEY_AP_SSID, g_apSsid);
+    String apP = g_prefs.getString(KEY_AP_PASS, g_apPass);
+    g_prefs.end();
+
+    String ipNow = g_eth.isReady() ? ipToString(g_eth.getIP()) : ipPref;
+    String maskNow = g_eth.isReady() ? ipToString(g_eth.getSubnetMask()) : maskPref;
+    String gwNow = g_eth.isReady() ? ipToString(g_eth.getGateway()) : gwPref;
+    String dnsNow = g_eth.isReady() ? ipToString(g_eth.getDNSServer()) : dnsPref;
+
+    // 170..177 IP (8 regs)
+    // 178..185 MASK (8)
+    // 186..193 GW (8)
+    // 194..201 DNS (8)
+    // 202 DHCP
+    // 203 TCPPORT
+    // 204..211 AP_SSID (8)
+    // 212..219 AP_PASS (8)
+
+    writePackedStringToRegs(&mb_netInfoRegs[0], 8, ipNow);
+    writePackedStringToRegs(&mb_netInfoRegs[8], 8, maskNow);
+    writePackedStringToRegs(&mb_netInfoRegs[16], 8, gwNow);
+    writePackedStringToRegs(&mb_netInfoRegs[24], 8, dnsNow);
+
+    mb_netInfoRegs[32] = dhcp ? 1 : 0;     // reg 202
+    mb_netInfoRegs[33] = port;             // reg 203
+
+    writePackedStringToRegs(&mb_netInfoRegs[34], 8, apS);
+    writePackedStringToRegs(&mb_netInfoRegs[42], 8, apP);
+}
+
+static void refreshMbSettingsRegs() {
+    // Store indexes, not raw baud (uint16-safe)
+    mb_mbSetRegs[0] = g_mbCfg.slaveId;                  // 230
+    mb_mbSetRegs[1] = baudToIndex(g_mbCfg.baud);        // 231 (INDEX)
+    mb_mbSetRegs[2] = g_mbCfg.dataBits;                 // 232
+    mb_mbSetRegs[3] = g_mbCfg.parity;                   // 233 (0=N 1=O 2=E)
+    mb_mbSetRegs[4] = g_mbCfg.stopBits;                 // 234
+}
+
+static void refreshSerialSettingsRegs() {
+    // Store indexes, not raw baud (uint16-safe)
+    mb_serSetRegs[0] = baudToIndex(g_serCfg.baud);  // 240 (INDEX)
+    mb_serSetRegs[1] = g_serCfg.dataBits;           // 241
+    mb_serSetRegs[2] = g_serCfg.parity;             // 242
+    mb_serSetRegs[3] = g_serCfg.stopBits;           // 243
+}
+
+static uint32_t serialConfigUsb(uint8_t db, uint8_t par, uint8_t sb) {
+    if (db != 7 && db != 8) db = 8;
+    if (par > 2) par = 0;
+    if (sb != 2) sb = 1;
+
+    if (db == 8) {
+        if (sb == 1) return (par == 0) ? SERIAL_8N1 : (par == 1) ? SERIAL_8O1 : SERIAL_8E1;
+        else         return (par == 0) ? SERIAL_8N2 : (par == 1) ? SERIAL_8O2 : SERIAL_8E2;
+    }
+    else {
+        if (sb == 1) return (par == 0) ? SERIAL_7N1 : (par == 1) ? SERIAL_7O1 : SERIAL_7E1;
+        else         return (par == 0) ? SERIAL_7N2 : (par == 1) ? SERIAL_7O2 : SERIAL_7E2;
+    }
+}
+
+static void applyUsbSerialSettingsFromRegs() {
+    uint16_t baud = mb_serSetRegs[0];
+    uint8_t db = (uint8_t)mb_serSetRegs[1];
+    uint8_t par = (uint8_t)mb_serSetRegs[2];
+    uint8_t sb = (uint8_t)mb_serSetRegs[3];
+
+    if (baud < 1200) baud = 115200;
+    if (baud > 2000000) baud = 115200;
+
+    uint32_t cfg = serialConfigUsb(db, par, sb);
+
+    // Re-init Serial (USB console)
+    Serial.flush();
+    Serial.end();
+    delay(50);
+    Serial.begin(baud, cfg);
+    delay(50);
+
+    INFO_LOG("USB Serial updated via Modbus: baud=%u db=%u par=%u sb=%u", baud, db, par, sb);
+}
+
+static void refreshBuzzerRegsDefaults() {
+    if (mb_buzRegs[0] == 0) {
+        mb_buzRegs[0] = 2000; // freq
+        mb_buzRegs[1] = 200;  // ms
+        mb_buzRegs[2] = 200;  // pattern on
+        mb_buzRegs[3] = 200;  // pattern off
+        mb_buzRegs[4] = 5;    // repeats
+        mb_buzRegs[5] = 0;    // cmd
+    }
+}
+
+
+static uint16_t mbNetInfoSet(TRegister* reg, uint16_t val) {
+    // Allow writing DHCP/TCPPORT/APSSID/APPASS + optionally static IP strings
+    // For safety, we will write only known scalar regs + AP fields; others can be added.
+    uint16_t addr = reg->address.address;
+    uint16_t idx = addr - MB_REG_NETINFO_START;
+
+    if (idx >= 50) return reg->value;
+
+    // Update mirror
+    mb_netInfoRegs[idx] = val;
+    reg->value = val;
+
+    // If writing DHCP (202) or TCPPORT (203), persist it.
+    if (addr == 202 || addr == 203) {
+        bool dhcp = mb_netInfoRegs[32] != 0;
+        uint16_t tcpPort = mb_netInfoRegs[33];
+        if (tcpPort < 1) tcpPort = 1;
+        if (tcpPort > 65535) tcpPort = 65535;
+
+        g_prefs.begin(PREF_NS_NET, false);
+        g_prefs.putBool(KEY_ETH_DHCP, dhcp);
+        g_prefs.putUShort(KEY_TCP_PORT, tcpPort);
+        g_prefs.end();
+
+        // Apply runtime TCP port
+        g_tcpPort = tcpPort;
+
+        // recommend reboot for full network restart
+        tcpSend("NETCFG OK"); // harmless if no TCP client
+    }
+
+    // AP SSID/PASS blocks: 204..219 => idx 34..49
+    if (addr >= 204 && addr <= 219) {
+        String apS = readPackedStringFromRegs(&mb_netInfoRegs[34], 8);
+        String apP = readPackedStringFromRegs(&mb_netInfoRegs[42], 8);
+
+        g_prefs.begin(PREF_NS_NET, false);
+        g_prefs.putString(KEY_AP_SSID, apS);
+        g_prefs.putString(KEY_AP_PASS, apP);
+        g_prefs.end();
+
+        g_apSsid = apS;
+        g_apPass = apP;
+    }
+
+    return reg->value;
+}
+
+
+
+// Helpers: pack/unpack ASCII (2 chars per uint16 register, hi-byte then lo-byte)
+static void packAsciiToRegs(uint16_t* outRegs, uint16_t regCount, const String& s) {
+    memset(outRegs, 0, regCount * sizeof(uint16_t));
+    const size_t maxChars = (size_t)regCount * 2;
+    String t = s;
+    if (t.length() > (int)maxChars) t = t.substring(0, (int)maxChars);
+
+    for (size_t i = 0; i < (size_t)t.length(); i++) {
+        uint8_t ch = (uint8_t)t[i];
+        size_t r = i / 2;
+        bool hi = ((i % 2) == 0);
+        if (r >= regCount) break;
+        if (hi) outRegs[r] |= ((uint16_t)ch << 8);
+        else    outRegs[r] |= ((uint16_t)ch);
+    }
+}
+
+static String readAsciiFromRegs(const uint16_t* regs, uint16_t regCount) {
+    String s;
+    s.reserve(regCount * 2);
+    for (uint16_t i = 0; i < regCount; i++) {
+        uint8_t hi = (uint8_t)((regs[i] >> 8) & 0xFF);
+        uint8_t lo = (uint8_t)(regs[i] & 0xFF);
+        if (hi) s += (char)hi;
+        if (lo) s += (char)lo;
+    }
+    s.trim();
+    return s;
+}
+
+static void loadSerialConfig() {
+    g_prefs.begin(PREF_NS_SER, true);
+    g_serCfg.baud = g_prefs.getULong(KEY_SER_BAUD, 115200);
+    g_serCfg.parity = g_prefs.getUChar(KEY_SER_PAR, 0);
+    g_serCfg.stopBits = g_prefs.getUChar(KEY_SER_SB, 1);
+    g_serCfg.dataBits = g_prefs.getUChar(KEY_SER_DB, 8);
+    g_prefs.end();
+
+    if (g_serCfg.baud < 1200) g_serCfg.baud = 115200;
+    if (g_serCfg.baud > 2000000) g_serCfg.baud = 115200;
+    if (g_serCfg.parity > 2) g_serCfg.parity = 0;
+    if (g_serCfg.stopBits != 2) g_serCfg.stopBits = 1;
+    if (g_serCfg.dataBits != 7) g_serCfg.dataBits = 8;
+}
+
+static void saveSerialConfig() {
+    g_prefs.begin(PREF_NS_SER, false);
+    g_prefs.putULong(KEY_SER_BAUD, g_serCfg.baud);
+    g_prefs.putUChar(KEY_SER_PAR, g_serCfg.parity);
+    g_prefs.putUChar(KEY_SER_SB, g_serCfg.stopBits);
+    g_prefs.putUChar(KEY_SER_DB, g_serCfg.dataBits);
+    g_prefs.end();
+}
+
+// Refresh the new Modbus mirror arrays
+static void updateModbusSystemInfoRegs() {
+    // Board info comes from PREF_NS_HWINFO + efuse MAC
+    g_prefs.begin(PREF_NS_HWINFO, true);
+    String board = g_prefs.getString(KEY_BOARD_NAME, "KC_Link A8R-M");
+    String sn = g_prefs.getString(KEY_BOARD_SERIAL, "");
+    String mfg = g_prefs.getString(KEY_MANUFACTURER, MANUFACTURER_STR);
+    String fw = g_prefs.getString(KEY_FW_VER, FW_VERSION_STR);
+    String hw = g_prefs.getString(KEY_HW_VER, HW_VERSION_STR);
+    String year = g_prefs.getString(KEY_YEAR, "2025");
+    g_prefs.end();
+
+    String mac = espMacToString();
+
+    // 100..115 board name (32 chars = 16 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[0], 16, board);
+    // 116..131 serial (32 chars = 16 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[16], 16, sn);
+    // 132..139 manufacturer (16 chars = 8 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[32], 8, mfg);
+    // 140..147 MAC (16 chars = 8 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[40], 8, mac);
+    // 148..151 FW (8 chars = 4 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[48], 4, fw);
+    // 152..155 HW (8 chars = 4 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[52], 4, hw);
+    // 156 year (uint16)
+    mb_sysInfoRegs[56] = (uint16_t)year.toInt();
+}
+
+static void updateModbusNetworkInfoRegs() {
+    g_prefs.begin(PREF_NS_NET, true);
+    bool dhcp = g_prefs.getBool(KEY_ETH_DHCP, true);
+    String ipPref = g_prefs.getString(KEY_ETH_IP, "");
+    String maskPref = g_prefs.getString(KEY_ETH_MASK, "255.255.255.0");
+    String gwPref = g_prefs.getString(KEY_ETH_GW, "");
+    String dnsPref = g_prefs.getString(KEY_ETH_DNS, "8.8.8.8");
+    uint16_t port = g_prefs.getUShort(KEY_TCP_PORT, 5000);
+    String apS = g_prefs.getString(KEY_AP_SSID, g_apSsid);
+    String apP = g_prefs.getString(KEY_AP_PASS, g_apPass);
+    g_prefs.end();
+
+    // Use CURRENT runtime values when ready (preferred)
+    String ipNow = g_eth.isReady() ? ipToString(g_eth.getIP()) : ipPref;
+    String maskNow = g_eth.isReady() ? ipToString(g_eth.getSubnetMask()) : maskPref;
+    String gwNow = g_eth.isReady() ? ipToString(g_eth.getGateway()) : gwPref;
+    String dnsNow = g_eth.isReady() ? ipToString(g_eth.getDNSServer()) : dnsPref;
+
+    // 170..177 IP (16 chars = 8 regs)
+    packAsciiToRegs(&mb_netInfoRegs[0], 8, ipNow);
+    // 178..185 MASK
+    packAsciiToRegs(&mb_netInfoRegs[8], 8, maskNow);
+    // 186..193 GW
+    packAsciiToRegs(&mb_netInfoRegs[16], 8, gwNow);
+    // 194..201 DNS
+    packAsciiToRegs(&mb_netInfoRegs[24], 8, dnsNow);
+
+    // 202 DHCP, 203 TCPPORT
+    mb_netInfoRegs[32] = dhcp ? 1 : 0;
+    mb_netInfoRegs[33] = port;
+
+    // 204..211 AP_SSID
+    packAsciiToRegs(&mb_netInfoRegs[34], 8, apS);
+    // 212..219 AP_PASS
+    packAsciiToRegs(&mb_netInfoRegs[42], 8, apP);
+}
+
+static void updateModbusSettingsRegs() {
+    mb_mbSetRegs[0] = g_mbCfg.slaveId;
+    mb_mbSetRegs[1] = baudToIndex(g_mbCfg.baud); // INDEX
+    mb_mbSetRegs[2] = g_mbCfg.dataBits;
+    mb_mbSetRegs[3] = g_mbCfg.parity;
+    mb_mbSetRegs[4] = g_mbCfg.stopBits;
+
+    mb_serSetRegs[0] = baudToIndex(g_serCfg.baud); // INDEX
+    mb_serSetRegs[1] = g_serCfg.dataBits;
+    mb_serSetRegs[2] = g_serCfg.parity;
+    mb_serSetRegs[3] = g_serCfg.stopBits;
+}
+
+// Add NEW Modbus callbacks
+static uint16_t mbSysInfoGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_SYSINFO_START;
+    return (idx < 57) ? mb_sysInfoRegs[idx] : 0;
+}
+static uint16_t mbNetInfoGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_NETINFO_START;
+    return (idx < 50) ? mb_netInfoRegs[idx] : 0;
+}
+
+// Settings set callbacks
+static uint16_t mbMbSetGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_MBSET_START;
+    return (idx < 5) ? mb_mbSetRegs[idx] : 0;
+}
+
+static uint16_t mbMbSetSet(TRegister* reg, uint16_t val) {
+    uint16_t idx = reg->address.address - MB_REG_MBSET_START;
+    if (idx >= 5) return reg->value;
+
+    mb_mbSetRegs[idx] = val;
+
+    if (idx == 0) {
+        uint8_t sid = (uint8_t)val;
+        if (sid < 1 || sid > 247) sid = 1;
+        g_mbCfg.slaveId = sid;
+    }
+    else if (idx == 1) {
+        // val is BAUD INDEX
+        uint32_t b = indexToBaud(val, 9600);
+        g_mbCfg.baud = b;
+    }
+    else if (idx == 2) {
+        g_mbCfg.dataBits = (val == 7) ? 7 : 8;
+    }
+    else if (idx == 3) {
+        g_mbCfg.parity = (val > 2) ? 0 : (uint8_t)val;
+    }
+    else if (idx == 4) {
+        g_mbCfg.stopBits = (val == 2) ? 2 : 1;
+    }
+
+    saveModbusConfig();
+
+    reg->value = val;
+    return reg->value;
+}
+
+static uint16_t mbSerSetGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_SERSET_START;
+    return (idx < 4) ? mb_serSetRegs[idx] : 0;
+}
+
+static uint16_t mbSerSetSet(TRegister* reg, uint16_t val) {
+    uint16_t idx = reg->address.address - MB_REG_SERSET_START;
+    if (idx >= 4) return reg->value;
+
+    mb_serSetRegs[idx] = val;
+
+    if (idx == 0) {
+        // val is BAUD INDEX
+        uint32_t b = indexToBaud(val, 115200);
+        g_serCfg.baud = b;
+    }
+    else if (idx == 1) {
+        g_serCfg.dataBits = (val == 7) ? 7 : 8;
+    }
+    else if (idx == 2) {
+        g_serCfg.parity = (val > 2) ? 0 : (uint8_t)val;
+    }
+    else if (idx == 3) {
+        g_serCfg.stopBits = (val == 2) ? 2 : 1;
+    }
+
+    saveSerialConfig();
+
+    reg->value = val;
+    return reg->value;
+}
+
+static uint16_t mbBuzzGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_BUZZ_START;
+    return (idx < 6) ? mb_buzRegs[idx] : 0;
+}
+static uint16_t mbBuzzSet(TRegister* reg, uint16_t val) {
+    uint16_t idx = reg->address.address - MB_REG_BUZZ_START;
+    if (idx >= 6) return reg->value;
+
+    mb_buzRegs[idx] = val;
+
+    // BUZ_CMD at 255 (idx 5)
+    if (idx == 5) {
+        uint16_t cmd = val;
+        uint16_t freq = mb_buzRegs[0] ? mb_buzRegs[0] : 2000;
+        uint16_t ms = mb_buzRegs[1] ? mb_buzRegs[1] : 200;
+        uint16_t onMs = mb_buzRegs[2] ? mb_buzRegs[2] : 200;
+        uint16_t offMs = mb_buzRegs[3];
+        uint8_t rep = (uint8_t)(mb_buzRegs[4] ? mb_buzRegs[4] : 5);
+
+        if (cmd == 1) {
+            g_rtc.simpleBeep(freq, ms);
+        }
+        else if (cmd == 2) {
+            buzzStart(freq, onMs, offMs, rep);
+        }
+        else {
+            buzzStop();
+            g_rtc.stopBeep();
+        }
+        // auto-clear cmd
+        mb_buzRegs[5] = 0;
+    }
+
+    reg->value = val;
+    return reg->value;
+}
+
+
 
 // ======================================================================
 // NETCFG serial dump (unchanged except adds AI range)
@@ -482,6 +1097,11 @@ void setup() {
     loadNetworkConfig();
     loadAnalogConfig();
 
+    // ===== NEW (MODBUS) =====
+    loadModbusConfig();
+
+    loadSerialConfig();
+
     Wire.begin(I2C_SDA_PIN, I2C_SCK_PIN);
     delay(50);
 
@@ -534,6 +1154,16 @@ void setup() {
         netcfgPersistRuntimeLease();
     }
 
+
+    // ===== NEW (MODBUS) =====
+    if (g_mbCfg.enabled) {
+        initModbus();
+    }
+    else {
+        Serial.println(F("MODBUS disabled by preferences."));
+    }
+
+
     netcfgSerialDump();
 
     printHelp();
@@ -555,6 +1185,20 @@ void loop() {
     schedUpdate();
     buzzUpdate();
 
+    // ===== NEW (MODBUS) =====
+    if (g_mbCfg.enabled) {
+        // refresh Modbus register mirror periodically
+        static uint32_t lastMbRefresh = 0;
+        if (millis() - lastMbRefresh > 200) {
+            lastMbRefresh = millis();
+            updateModbusData();
+            updateModbusSystemInfoRegs();
+            updateModbusNetworkInfoRegs();
+            updateModbusSettingsRegs();
+        }
+        g_modbus.task();
+    }
+
     processSerial();
 
     if (g_rebootPending && (int32_t)(millis() - g_rebootAtMs) >= 0) {
@@ -569,6 +1213,364 @@ void loop() {
         netcfgPersistRuntimeLease();
     }
 }
+
+
+// ======================================================================
+// ===== MODBUS INTEGRATION (based on MODBUS_Test.ino) =====
+// ======================================================================
+
+static void initModbus() {
+    Serial.println("Initializing MODBUS communication...");
+
+    // Begin with stored baud (ModbusComm::begin only configures serial);
+    // parity/data/stop is fixed by HardwareSerial begin config inside ModbusComm currently (8N1).
+    // For your required 8N1 defaults, this is correct.
+    // If you later want true parity/stopbits control on ESP32, we can extend ModbusComm::begin
+    // to accept SERIAL_8N1 / SERIAL_8E1 / SERIAL_8O1, etc.
+    if (g_modbus.begin(g_mbCfg.baud)) {
+        g_modbus.server(g_mbCfg.slaveId);
+
+        Serial.printf("MODBUS initialized at %lu baud, slaveId=%u\n", g_mbCfg.baud, g_mbCfg.slaveId);
+        Serial.println("Configuring MODBUS register handlers...");
+
+        // Input registers (FC 04) 0..7 digital inputs (0/1)
+        if (!g_modbus.addInputRegisterHandler(MB_REG_INPUTS_START, NUM_DIGITAL_INPUTS, mbInputsCallback)) {
+            ERROR_LOG("Failed to add input register handlers for digital inputs");
+        }
+
+        // Discrete inputs (FC 02) 0..7: same digital inputs (0/1)
+        if (!g_modbus.addDiscreteInputHandler(MB_REG_INPUTS_START, NUM_DIGITAL_INPUTS, mbDiscreteInputsCallback)) {
+            ERROR_LOG("Failed to add discrete input handlers for digital inputs");
+        }
+
+        // Holding registers for relays (10..15)
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_RELAYS_START, NUM_RELAY_OUTPUTS, mbRelaysGet, mbRelaysSet)) {
+            ERROR_LOG("Failed to add holding register handlers for relays");
+        }
+
+        // Coils for relays (10..15) with separate GET/SET callbacks
+        if (!g_modbus.addCoilHandlers(MB_REG_RELAYS_START, NUM_RELAY_OUTPUTS, mbRelaysCoilGet, mbRelaysCoilSet)) {
+            ERROR_LOG("Failed to add coil handlers for relays");
+        }
+
+        // Input registers for analog + current (from 20)
+        const uint16_t analogBlockRegs = (NUM_ANALOG_CHANNELS + NUM_CURRENT_CHANNELS) * 2; // raw+scaled per channel
+        if (!g_modbus.addInputRegisterHandler(MB_REG_ANALOG_START, analogBlockRegs, mbAnalogCallback)) {
+            ERROR_LOG("Failed to add input register handlers for analog block");
+        }
+
+        // DHT temp (30..) and humidity (40..)
+        if (!g_modbus.addInputRegisterHandler(MB_REG_TEMP_START, NUM_DHT_SENSORS,
+            [](TRegister* reg, uint16_t) {
+                return mb_tempRegs[reg->address.address - MB_REG_TEMP_START];
+            })) {
+            ERROR_LOG("Failed to add input register handlers for temperature");
+        }
+        if (!g_modbus.addInputRegisterHandler(MB_REG_HUM_START, NUM_DHT_SENSORS,
+            [](TRegister* reg, uint16_t) {
+                return mb_humRegs[reg->address.address - MB_REG_HUM_START];
+            })) {
+            ERROR_LOG("Failed to add input register handlers for humidity");
+        }
+
+        // DS18B20 temps (50..)
+        if (!g_modbus.addInputRegisterHandler(MB_REG_DS18B20_START, MAX_DS18B20_SENSORS,
+            [](TRegister* reg, uint16_t) {
+                return mb_ds18Regs[reg->address.address - MB_REG_DS18B20_START];
+            })) {
+            ERROR_LOG("Failed to add input register handlers for DS18B20");
+        }
+
+        // DAC controls (70..73) as holding registers
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_DAC_START, 4, mbDacGet, mbDacSet)) {
+            ERROR_LOG("Failed to add holding register handlers for DAC");
+        }
+
+        // RTC (80..87) as holding registers
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_RTC_START, 8, mbRtcGet, mbRtcSet)) {
+            ERROR_LOG("Failed to add holding register handlers for RTC");
+        }
+
+
+        // ===== NEW: System/Info (BoardInfo) holding regs 100..156 =====
+        refreshSysInfoRegs();
+        if (!g_modbus.addHoldingRegisterHandler(MB_REG_SYSINFO_START, 57, mbSysInfoGet)) {
+            ERROR_LOG("Failed to add BoardInfo holding registers");
+        }
+
+        // ===== NEW: NetworkInfo holding regs 170..219 =====
+        refreshNetInfoRegs();
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_NETINFO_START, 50, mbNetInfoGet, mbNetInfoSet)) {
+            ERROR_LOG("Failed to add NetworkInfo holding registers");
+        }
+
+        // ===== NEW: Modbus settings 230..234 =====
+        refreshMbSettingsRegs();
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_MBSET_START, 5, mbMbSetGet, mbMbSetSet)) {
+            ERROR_LOG("Failed to add Modbus settings holding registers");
+        }
+
+        // ===== NEW: Serial (USB console) settings 240..243 =====
+        refreshSerialSettingsRegs();
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_SERSET_START, 4, mbSerSetGet, mbSerSetSet)) {
+            ERROR_LOG("Failed to add Serial settings holding registers");
+        }
+
+        // ===== NEW: Buzzer control 250..255 =====
+        refreshBuzzerRegsDefaults();
+        if (!g_modbus.addHoldingRegisterHandlers(MB_REG_BUZZ_START, 6, mbBuzzGet, mbBuzzSet)) {
+            ERROR_LOG("Failed to add Buzzer holding registers");
+        }
+
+        Serial.println("MODBUS register handlers configured");
+    }
+    else {
+        Serial.println("Failed to initialize MODBUS");
+    }
+}
+
+static void updateModbusData() {
+    // Digital inputs
+    if (g_di.isConnected()) {
+        g_di.updateAllInputs();
+        uint8_t st = g_di.getInputState();
+        for (int i = 0; i < NUM_DIGITAL_INPUTS; i++) mb_inputRegs[i] = (st & (1 << i)) ? 1 : 0;
+    }
+    else {
+        for (int i = 0; i < NUM_DIGITAL_INPUTS; i++) mb_inputRegs[i] = 0;
+    }
+
+    // Relay states (store logical 0/1 where 1=ON, 0=OFF)
+    // NOTE: Your RelayDriver uses active-low. getAllStates returns GPIO_A bits; ON means bit=0.
+    if (g_relays.isConnected()) {
+        uint8_t relBits = g_relays.getAllStates() & 0x3F;
+        for (int i = 0; i < NUM_RELAY_OUTPUTS; i++) {
+            bool on = ((relBits & (1 << i)) == 0); // active-low ON
+            mb_relayRegs[i] = on ? 1 : 0;
+        }
+    }
+    else {
+        for (int i = 0; i < NUM_RELAY_OUTPUTS; i++) mb_relayRegs[i] = 0;
+    }
+
+    // Analog voltage: raw + scaled*100
+    for (uint8_t i = 0; i < NUM_ANALOG_CHANNELS; i++) {
+        mb_analogRegs[i * 2] = g_ai.readRawVoltageChannel(i);
+        mb_analogRegs[i * 2 + 1] = (uint16_t)lroundf(g_ai.readVoltage(i) * 100.0f);
+    }
+
+    // Analog current: raw + scaled*100
+    for (uint8_t i = 0; i < NUM_CURRENT_CHANNELS; i++) {
+        const uint8_t base = (NUM_ANALOG_CHANNELS + i) * 2;
+        mb_analogRegs[base] = g_ai.readRawCurrentChannel(i);
+        mb_analogRegs[base + 1] = (uint16_t)lroundf(g_ai.readCurrent(i) * 100.0f);
+    }
+
+    // DHT / DS18
+    g_dht.update();
+    for (uint8_t i = 0; i < NUM_DHT_SENSORS; i++) {
+        float t = g_dht.getTemperature(i); // already in current unit; firmware uses Celsius by default
+        float h = g_dht.getHumidity(i);
+        mb_tempRegs[i] = isnan(t) ? 0 : (uint16_t)lroundf(t * 100.0f);
+        mb_humRegs[i] = isnan(h) ? 0 : (uint16_t)lroundf(h * 100.0f);
+    }
+    uint8_t dsCnt = g_dht.getDS18B20Count();
+    for (uint8_t i = 0; i < MAX_DS18B20_SENSORS; i++) mb_ds18Regs[i] = 0;
+    for (uint8_t i = 0; i < dsCnt && i < MAX_DS18B20_SENSORS; i++) {
+        float t = g_dht.getDS18B20Temperature(i);
+        // Keep same encoding as MODBUS_Test: (t + 100.0) * 100, 0 means invalid
+        mb_ds18Regs[i] = (t < -100.0f) ? 0 : (uint16_t)lroundf((t + 100.0f) * 100.0f);
+    }
+
+    // RTC
+    if (g_rtc.isConnected()) {
+        DateTime now = g_rtc.getDateTime(true);
+        mb_rtcRegs[0] = now.year();
+        mb_rtcRegs[1] = now.month();
+        mb_rtcRegs[2] = now.day();
+        mb_rtcRegs[3] = now.hour();
+        mb_rtcRegs[4] = now.minute();
+        mb_rtcRegs[5] = now.second();
+    }
+
+    // DAC
+    if (g_dac.isInitialized()) {
+        mb_dacRegs[0] = g_dac.getRaw(0);
+        mb_dacRegs[1] = g_dac.getRaw(1);
+        mb_dacRegs[2] = (uint16_t)lroundf(g_dac.getVoltage(0) * 100.0f);
+        mb_dacRegs[3] = (uint16_t)lroundf(g_dac.getVoltage(1) * 100.0f);
+    }
+
+
+    // Refresh dynamic sys/net mirrors periodically (cheap)
+    refreshSysInfoRegs();
+    refreshNetInfoRegs();
+    refreshMbSettingsRegs();
+    refreshSerialSettingsRegs();
+}
+
+// Input registers (FC04)
+static uint16_t mbInputsCallback(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_INPUTS_START;
+    return (idx < NUM_DIGITAL_INPUTS) ? mb_inputRegs[idx] : 0;
+}
+
+// Discrete inputs (FC02) callback: return 0xFF00 / 0x0000
+static uint16_t mbDiscreteInputsCallback(TRegister* reg, uint16_t) {
+    const uint16_t idx = reg->address.address - MB_REG_INPUTS_START;
+    if (idx >= NUM_DIGITAL_INPUTS) {
+        reg->value = 0x0000;
+        return reg->value;
+    }
+    const bool on = (mb_inputRegs[idx] != 0);
+    reg->value = on ? 0xFF00 : 0x0000;
+    return reg->value;
+}
+
+// Holding relays (FC03/FC06)
+static inline bool isRelayOnValue(uint16_t v) {
+    return (v == 0x0001) || (v == 0x00FF) || (v == 0xFF00) || (v == 0xFFFF);
+}
+static inline bool isRelayOffValue(uint16_t v) {
+    return (v == 0x0000);
+}
+
+static uint16_t mbRelaysGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_RELAYS_START;
+    uint16_t val = (idx < NUM_RELAY_OUTPUTS) ? mb_relayRegs[idx] : 0;
+    return val;
+}
+
+static uint16_t mbRelaysSet(TRegister* reg, uint16_t val) {
+    const uint16_t addr = reg->address.address;
+    const uint16_t idx = addr - MB_REG_RELAYS_START;
+    if (idx >= NUM_RELAY_OUTPUTS) {
+        reg->value = val;
+        return 0;
+    }
+
+    const uint16_t prev = mb_relayRegs[idx];
+    bool desiredState = (prev != 0);
+    bool validPattern = true;
+
+    if (isRelayOffValue(val)) desiredState = false;
+    else if (isRelayOnValue(val)) desiredState = true;
+    else {
+        // ignore invalid pattern (no toggle here, to keep stable)
+        validPattern = false;
+    }
+
+    uint16_t desired = desiredState ? 1 : 0;
+
+    if (desired != prev) {
+        if (g_relays.isConnected()) {
+            g_relays.setState((uint8_t)(idx + 1), desired ? RELAY_ON : RELAY_OFF);
+        }
+        mb_relayRegs[idx] = desired;
+    }
+
+    // Echo back raw value per FC06
+    reg->value = val;
+    (void)validPattern;
+    return desired;
+}
+
+// Coils (FC01/FC05)
+static inline uint16_t coilStateToRaw(uint16_t state01) {
+    return state01 ? 0xFF00 : 0x0000;
+}
+
+static uint16_t mbRelaysCoilGet(TRegister* reg, uint16_t) {
+    const uint16_t addr = reg->address.address;
+    const uint16_t idx = addr - MB_REG_RELAYS_START;
+    if (idx >= NUM_RELAY_OUTPUTS) return 0x0000;
+
+    const uint16_t raw = coilStateToRaw(mb_relayRegs[idx]);
+    reg->value = raw;
+    return raw;
+}
+
+static uint16_t mbRelaysCoilSet(TRegister* reg, uint16_t val) {
+    const uint16_t addr = reg->address.address;
+    const uint16_t idx = addr - MB_REG_RELAYS_START;
+    if (idx >= NUM_RELAY_OUTPUTS) return reg->value;
+
+    const uint16_t prev = mb_relayRegs[idx];
+    uint16_t desired = prev;
+
+    if (val == 0xFF00) desired = 1;
+    else if (val == 0x0000) desired = 0;
+    else {
+        // Non-standard => ignore (no toggle). PC should send FF00/0000.
+    }
+
+    if (desired != prev) {
+        if (g_relays.isConnected()) {
+            g_relays.setState((uint8_t)(idx + 1), desired ? RELAY_ON : RELAY_OFF);
+        }
+        mb_relayRegs[idx] = desired;
+    }
+
+    reg->value = val; // echo request raw
+    return val;
+}
+
+// Analog input registers (FC04)
+static uint16_t mbAnalogCallback(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_ANALOG_START;
+    const uint16_t total = (NUM_ANALOG_CHANNELS + NUM_CURRENT_CHANNELS) * 2;
+    return (idx < total) ? mb_analogRegs[idx] : 0;
+}
+
+// DAC holding regs (FC03/FC06)
+static uint16_t mbDacGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_DAC_START;
+    return (idx < 4) ? mb_dacRegs[idx] : 0;
+}
+
+static uint16_t mbDacSet(TRegister* reg, uint16_t val) {
+    uint16_t idx = reg->address.address - MB_REG_DAC_START;
+    if (idx >= 4) return reg->value;
+
+    mb_dacRegs[idx] = val;
+
+    if (g_dac.isInitialized()) {
+        switch (idx) {
+        case 0: g_dac.setRaw(0, val); break;
+        case 1: g_dac.setRaw(1, val); break;
+        case 2: g_dac.setVoltage(0, val / 100.0f); break;
+        case 3: g_dac.setVoltage(1, val / 100.0f); break;
+        }
+    }
+
+    reg->value = val;
+    return reg->value;
+}
+
+// RTC holding regs (FC03/FC06)
+static uint16_t mbRtcGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_RTC_START;
+    return (idx < 8) ? mb_rtcRegs[idx] : 0;
+}
+
+static uint16_t mbRtcSet(TRegister* reg, uint16_t val) {
+    uint16_t idx = reg->address.address - MB_REG_RTC_START;
+    if (idx >= 8) return reg->value;
+
+    mb_rtcRegs[idx] = val;
+    reg->value = val;
+
+    // Apply RTC only when seconds register written (idx 5), like MODBUS_Test
+    if (idx == 5 && g_rtc.isConnected()) {
+        g_rtc.setDateTime(DateTime(
+            mb_rtcRegs[0], mb_rtcRegs[1], mb_rtcRegs[2],
+            mb_rtcRegs[3], mb_rtcRegs[4], mb_rtcRegs[5]
+        ));
+    }
+    return reg->value;
+}
+
+
 
 // ======================================================================
 // NETWORK CONFIG LOAD
