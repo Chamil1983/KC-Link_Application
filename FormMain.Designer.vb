@@ -159,6 +159,11 @@ Partial Class FormMain
         Me.btnSchedApply = New System.Windows.Forms.Button()
         Me.lblSchedStatus = New System.Windows.Forms.Label()
         Me.grpAnalogTrig = New System.Windows.Forms.GroupBox()
+        Me.Label14 = New System.Windows.Forms.Label()
+        Me.Label13 = New System.Windows.Forms.Label()
+        Me.Label12 = New System.Windows.Forms.Label()
+        Me.LblTol = New System.Windows.Forms.Label()
+        Me.LblDebounce = New System.Windows.Forms.Label()
         Me.chkAnalogEnable = New System.Windows.Forms.CheckBox()
         Me.cboAnalogType = New System.Windows.Forms.ComboBox()
         Me.cboAnalogCh = New System.Windows.Forms.ComboBox()
@@ -223,11 +228,32 @@ Partial Class FormMain
         Me.cboComPort = New System.Windows.Forms.ComboBox()
         Me.lblComPort = New System.Windows.Forms.Label()
         Me.lblSerialHint = New System.Windows.Forms.Label()
-        Me.LblDebounce = New System.Windows.Forms.Label()
-        Me.LblTol = New System.Windows.Forms.Label()
-        Me.Label12 = New System.Windows.Forms.Label()
-        Me.Label13 = New System.Windows.Forms.Label()
-        Me.Label14 = New System.Windows.Forms.Label()
+        Me.tabPageModbus = New System.Windows.Forms.TabPage()
+        Me.grpModbusConn = New System.Windows.Forms.GroupBox()
+        Me.cboMbComPort = New System.Windows.Forms.ComboBox()
+        Me.btnMbRefreshPorts = New System.Windows.Forms.Button()
+        Me.cboMbBaud = New System.Windows.Forms.ComboBox()
+        Me.cboMbDataBits = New System.Windows.Forms.ComboBox()
+        Me.cboMbParity = New System.Windows.Forms.ComboBox()
+        Me.cboMbStopBits = New System.Windows.Forms.ComboBox()
+        Me.txtMbSlaveId = New System.Windows.Forms.TextBox()
+        Me.btnMbConnect = New System.Windows.Forms.Button()
+        Me.btnMbDisconnect = New System.Windows.Forms.Button()
+        Me.lblMbStatus = New System.Windows.Forms.Label()
+        Me.chkMbAutoPoll = New System.Windows.Forms.CheckBox()
+        Me.txtMbPollMs = New System.Windows.Forms.TextBox()
+        Me.btnMbReadOnce = New System.Windows.Forms.Button()
+        Me.grpModbusIO = New System.Windows.Forms.GroupBox()
+        Me.chkMbRel1 = New System.Windows.Forms.CheckBox()
+        Me.chkMbRel2 = New System.Windows.Forms.CheckBox()
+        Me.chkMbRel3 = New System.Windows.Forms.CheckBox()
+        Me.chkMbRel4 = New System.Windows.Forms.CheckBox()
+        Me.chkMbRel5 = New System.Windows.Forms.CheckBox()
+        Me.chkMbRel6 = New System.Windows.Forms.CheckBox()
+        Me.txtMbDac1mV = New System.Windows.Forms.TextBox()
+        Me.txtMbDac2mV = New System.Windows.Forms.TextBox()
+        Me.btnMbApplyDac = New System.Windows.Forms.Button()
+        Me.dgvModbusMap = New System.Windows.Forms.DataGridView()
         Me.grpNet.SuspendLayout()
         Me.grpRelays.SuspendLayout()
         Me.grpDI.SuspendLayout()
@@ -251,6 +277,10 @@ Partial Class FormMain
         Me.grpExistingSettings.SuspendLayout()
         Me.grpUserSettings.SuspendLayout()
         Me.grpSerial.SuspendLayout()
+        Me.tabPageModbus.SuspendLayout()
+        Me.grpModbusConn.SuspendLayout()
+        Me.grpModbusIO.SuspendLayout()
+        CType(Me.dgvModbusMap, System.ComponentModel.ISupportInitialize).BeginInit()
         Me.SuspendLayout()
         '
         'txtIp
@@ -935,6 +965,7 @@ Partial Class FormMain
         Me.tabMain.Controls.Add(Me.tabPageDashboard)
         Me.tabMain.Controls.Add(Me.tabPageSchedule)
         Me.tabMain.Controls.Add(Me.tabPageSettings)
+        Me.tabMain.Controls.Add(Me.tabPageModbus)
         Me.tabMain.Location = New System.Drawing.Point(0, 0)
         Me.tabMain.Name = "tabMain"
         Me.tabMain.SelectedIndex = 0
@@ -1619,6 +1650,54 @@ Partial Class FormMain
         Me.grpAnalogTrig.TabStop = False
         Me.grpAnalogTrig.Text = "Analog Trigger (Voltage/Current)"
         '
+        'Label14
+        '
+        Me.Label14.AutoSize = True
+        Me.Label14.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label14.Location = New System.Drawing.Point(386, 42)
+        Me.Label14.Name = "Label14"
+        Me.Label14.Size = New System.Drawing.Size(29, 13)
+        Me.Label14.TabIndex = 38
+        Me.Label14.Text = "HYS"
+        '
+        'Label13
+        '
+        Me.Label13.AutoSize = True
+        Me.Label13.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label13.Location = New System.Drawing.Point(337, 42)
+        Me.Label13.Name = "Label13"
+        Me.Label13.Size = New System.Drawing.Size(34, 13)
+        Me.Label13.TabIndex = 37
+        Me.Label13.Text = "SET2"
+        '
+        'Label12
+        '
+        Me.Label12.AutoSize = True
+        Me.Label12.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label12.Location = New System.Drawing.Point(288, 42)
+        Me.Label12.Name = "Label12"
+        Me.Label12.Size = New System.Drawing.Size(34, 13)
+        Me.Label12.TabIndex = 36
+        Me.Label12.Text = "SET1"
+        '
+        'LblTol
+        '
+        Me.LblTol.AutoSize = True
+        Me.LblTol.Location = New System.Drawing.Point(434, 45)
+        Me.LblTol.Name = "LblTol"
+        Me.LblTol.Size = New System.Drawing.Size(28, 13)
+        Me.LblTol.TabIndex = 35
+        Me.LblTol.Text = "TOL"
+        '
+        'LblDebounce
+        '
+        Me.LblDebounce.AutoSize = True
+        Me.LblDebounce.Location = New System.Drawing.Point(434, 20)
+        Me.LblDebounce.Name = "LblDebounce"
+        Me.LblDebounce.Size = New System.Drawing.Size(37, 13)
+        Me.LblDebounce.TabIndex = 34
+        Me.LblDebounce.Text = "DBNS"
+        '
         'chkAnalogEnable
         '
         Me.chkAnalogEnable.AutoSize = True
@@ -2246,53 +2325,253 @@ Partial Class FormMain
         Me.lblSerialHint.TabIndex = 0
         Me.lblSerialHint.Text = "Use SERIALNET on ESP32 to print network config."
         '
-        'LblDebounce
+        'tabPageModbus
         '
-        Me.LblDebounce.AutoSize = True
-        Me.LblDebounce.Location = New System.Drawing.Point(434, 20)
-        Me.LblDebounce.Name = "LblDebounce"
-        Me.LblDebounce.Size = New System.Drawing.Size(37, 13)
-        Me.LblDebounce.TabIndex = 34
-        Me.LblDebounce.Text = "DBNS"
+        Me.tabPageModbus.Controls.Add(Me.grpModbusConn)
+        Me.tabPageModbus.Controls.Add(Me.grpModbusIO)
+        Me.tabPageModbus.Controls.Add(Me.dgvModbusMap)
+        Me.tabPageModbus.Location = New System.Drawing.Point(4, 22)
+        Me.tabPageModbus.Name = "tabPageModbus"
+        Me.tabPageModbus.Size = New System.Drawing.Size(584, 673)
+        Me.tabPageModbus.TabIndex = 3
+        Me.tabPageModbus.Text = "MODBUS"
+        Me.tabPageModbus.UseVisualStyleBackColor = True
         '
-        'LblTol
+        'grpModbusConn
         '
-        Me.LblTol.AutoSize = True
-        Me.LblTol.Location = New System.Drawing.Point(434, 45)
-        Me.LblTol.Name = "LblTol"
-        Me.LblTol.Size = New System.Drawing.Size(28, 13)
-        Me.LblTol.TabIndex = 35
-        Me.LblTol.Text = "TOL"
+        Me.grpModbusConn.Controls.Add(Me.cboMbComPort)
+        Me.grpModbusConn.Controls.Add(Me.btnMbRefreshPorts)
+        Me.grpModbusConn.Controls.Add(Me.cboMbBaud)
+        Me.grpModbusConn.Controls.Add(Me.cboMbDataBits)
+        Me.grpModbusConn.Controls.Add(Me.cboMbParity)
+        Me.grpModbusConn.Controls.Add(Me.cboMbStopBits)
+        Me.grpModbusConn.Controls.Add(Me.txtMbSlaveId)
+        Me.grpModbusConn.Controls.Add(Me.btnMbConnect)
+        Me.grpModbusConn.Controls.Add(Me.btnMbDisconnect)
+        Me.grpModbusConn.Controls.Add(Me.lblMbStatus)
+        Me.grpModbusConn.Controls.Add(Me.chkMbAutoPoll)
+        Me.grpModbusConn.Controls.Add(Me.txtMbPollMs)
+        Me.grpModbusConn.Controls.Add(Me.btnMbReadOnce)
+        Me.grpModbusConn.Location = New System.Drawing.Point(12, 12)
+        Me.grpModbusConn.Name = "grpModbusConn"
+        Me.grpModbusConn.Size = New System.Drawing.Size(560, 120)
+        Me.grpModbusConn.TabIndex = 0
+        Me.grpModbusConn.TabStop = False
+        Me.grpModbusConn.Text = "Modbus RTU Connection (Master)"
         '
-        'Label12
+        'cboMbComPort
         '
-        Me.Label12.AutoSize = True
-        Me.Label12.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.Label12.Location = New System.Drawing.Point(288, 42)
-        Me.Label12.Name = "Label12"
-        Me.Label12.Size = New System.Drawing.Size(34, 13)
-        Me.Label12.TabIndex = 36
-        Me.Label12.Text = "SET1"
+        Me.cboMbComPort.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboMbComPort.Location = New System.Drawing.Point(16, 28)
+        Me.cboMbComPort.Name = "cboMbComPort"
+        Me.cboMbComPort.Size = New System.Drawing.Size(90, 21)
+        Me.cboMbComPort.TabIndex = 0
         '
-        'Label13
+        'btnMbRefreshPorts
         '
-        Me.Label13.AutoSize = True
-        Me.Label13.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.Label13.Location = New System.Drawing.Point(337, 42)
-        Me.Label13.Name = "Label13"
-        Me.Label13.Size = New System.Drawing.Size(34, 13)
-        Me.Label13.TabIndex = 37
-        Me.Label13.Text = "SET2"
+        Me.btnMbRefreshPorts.Location = New System.Drawing.Point(112, 26)
+        Me.btnMbRefreshPorts.Name = "btnMbRefreshPorts"
+        Me.btnMbRefreshPorts.Size = New System.Drawing.Size(70, 24)
+        Me.btnMbRefreshPorts.TabIndex = 1
+        Me.btnMbRefreshPorts.Text = "Refresh"
+        Me.btnMbRefreshPorts.UseVisualStyleBackColor = True
         '
-        'Label14
+        'cboMbBaud
         '
-        Me.Label14.AutoSize = True
-        Me.Label14.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.Label14.Location = New System.Drawing.Point(386, 42)
-        Me.Label14.Name = "Label14"
-        Me.Label14.Size = New System.Drawing.Size(29, 13)
-        Me.Label14.TabIndex = 38
-        Me.Label14.Text = "HYS"
+        Me.cboMbBaud.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboMbBaud.Location = New System.Drawing.Point(200, 28)
+        Me.cboMbBaud.Name = "cboMbBaud"
+        Me.cboMbBaud.Size = New System.Drawing.Size(80, 21)
+        Me.cboMbBaud.TabIndex = 2
+        '
+        'cboMbDataBits
+        '
+        Me.cboMbDataBits.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboMbDataBits.Location = New System.Drawing.Point(290, 28)
+        Me.cboMbDataBits.Name = "cboMbDataBits"
+        Me.cboMbDataBits.Size = New System.Drawing.Size(50, 21)
+        Me.cboMbDataBits.TabIndex = 3
+        '
+        'cboMbParity
+        '
+        Me.cboMbParity.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboMbParity.Location = New System.Drawing.Point(350, 28)
+        Me.cboMbParity.Name = "cboMbParity"
+        Me.cboMbParity.Size = New System.Drawing.Size(70, 21)
+        Me.cboMbParity.TabIndex = 4
+        '
+        'cboMbStopBits
+        '
+        Me.cboMbStopBits.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+        Me.cboMbStopBits.Location = New System.Drawing.Point(430, 28)
+        Me.cboMbStopBits.Name = "cboMbStopBits"
+        Me.cboMbStopBits.Size = New System.Drawing.Size(60, 21)
+        Me.cboMbStopBits.TabIndex = 5
+        '
+        'txtMbSlaveId
+        '
+        Me.txtMbSlaveId.Location = New System.Drawing.Point(500, 28)
+        Me.txtMbSlaveId.Name = "txtMbSlaveId"
+        Me.txtMbSlaveId.Size = New System.Drawing.Size(40, 20)
+        Me.txtMbSlaveId.TabIndex = 6
+        Me.txtMbSlaveId.Text = "1"
+        '
+        'btnMbConnect
+        '
+        Me.btnMbConnect.Location = New System.Drawing.Point(16, 60)
+        Me.btnMbConnect.Name = "btnMbConnect"
+        Me.btnMbConnect.Size = New System.Drawing.Size(90, 24)
+        Me.btnMbConnect.TabIndex = 7
+        Me.btnMbConnect.Text = "Connect"
+        Me.btnMbConnect.UseVisualStyleBackColor = True
+        '
+        'btnMbDisconnect
+        '
+        Me.btnMbDisconnect.Location = New System.Drawing.Point(112, 60)
+        Me.btnMbDisconnect.Name = "btnMbDisconnect"
+        Me.btnMbDisconnect.Size = New System.Drawing.Size(90, 24)
+        Me.btnMbDisconnect.TabIndex = 8
+        Me.btnMbDisconnect.Text = "Disconnect"
+        Me.btnMbDisconnect.UseVisualStyleBackColor = True
+        '
+        'lblMbStatus
+        '
+        Me.lblMbStatus.AutoSize = True
+        Me.lblMbStatus.Location = New System.Drawing.Point(210, 66)
+        Me.lblMbStatus.Name = "lblMbStatus"
+        Me.lblMbStatus.Size = New System.Drawing.Size(117, 13)
+        Me.lblMbStatus.TabIndex = 9
+        Me.lblMbStatus.Text = "Modbus: Disconnected"
+        '
+        'chkMbAutoPoll
+        '
+        Me.chkMbAutoPoll.AutoSize = True
+        Me.chkMbAutoPoll.Location = New System.Drawing.Point(16, 92)
+        Me.chkMbAutoPoll.Name = "chkMbAutoPoll"
+        Me.chkMbAutoPoll.Size = New System.Drawing.Size(68, 17)
+        Me.chkMbAutoPoll.TabIndex = 10
+        Me.chkMbAutoPoll.Text = "Auto Poll"
+        Me.chkMbAutoPoll.UseVisualStyleBackColor = True
+        '
+        'txtMbPollMs
+        '
+        Me.txtMbPollMs.Location = New System.Drawing.Point(90, 90)
+        Me.txtMbPollMs.Name = "txtMbPollMs"
+        Me.txtMbPollMs.Size = New System.Drawing.Size(60, 20)
+        Me.txtMbPollMs.TabIndex = 11
+        Me.txtMbPollMs.Text = "500"
+        '
+        'btnMbReadOnce
+        '
+        Me.btnMbReadOnce.Location = New System.Drawing.Point(160, 88)
+        Me.btnMbReadOnce.Name = "btnMbReadOnce"
+        Me.btnMbReadOnce.Size = New System.Drawing.Size(90, 24)
+        Me.btnMbReadOnce.TabIndex = 12
+        Me.btnMbReadOnce.Text = "Read Once"
+        Me.btnMbReadOnce.UseVisualStyleBackColor = True
+        '
+        'grpModbusIO
+        '
+        Me.grpModbusIO.Controls.Add(Me.chkMbRel1)
+        Me.grpModbusIO.Controls.Add(Me.chkMbRel2)
+        Me.grpModbusIO.Controls.Add(Me.chkMbRel3)
+        Me.grpModbusIO.Controls.Add(Me.chkMbRel4)
+        Me.grpModbusIO.Controls.Add(Me.chkMbRel5)
+        Me.grpModbusIO.Controls.Add(Me.chkMbRel6)
+        Me.grpModbusIO.Controls.Add(Me.txtMbDac1mV)
+        Me.grpModbusIO.Controls.Add(Me.txtMbDac2mV)
+        Me.grpModbusIO.Controls.Add(Me.btnMbApplyDac)
+        Me.grpModbusIO.Location = New System.Drawing.Point(12, 138)
+        Me.grpModbusIO.Name = "grpModbusIO"
+        Me.grpModbusIO.Size = New System.Drawing.Size(560, 90)
+        Me.grpModbusIO.TabIndex = 1
+        Me.grpModbusIO.TabStop = False
+        Me.grpModbusIO.Text = "Quick IO Controls (via Modbus)"
+        '
+        'chkMbRel1
+        '
+        Me.chkMbRel1.Location = New System.Drawing.Point(16, 23)
+        Me.chkMbRel1.Name = "chkMbRel1"
+        Me.chkMbRel1.Size = New System.Drawing.Size(63, 24)
+        Me.chkMbRel1.TabIndex = 0
+        Me.chkMbRel1.Text = "Relay1"
+        '
+        'chkMbRel2
+        '
+        Me.chkMbRel2.Location = New System.Drawing.Point(88, 23)
+        Me.chkMbRel2.Name = "chkMbRel2"
+        Me.chkMbRel2.Size = New System.Drawing.Size(72, 24)
+        Me.chkMbRel2.TabIndex = 1
+        Me.chkMbRel2.Text = "Relay2"
+        '
+        'chkMbRel3
+        '
+        Me.chkMbRel3.Location = New System.Drawing.Point(169, 23)
+        Me.chkMbRel3.Name = "chkMbRel3"
+        Me.chkMbRel3.Size = New System.Drawing.Size(62, 24)
+        Me.chkMbRel3.TabIndex = 2
+        Me.chkMbRel3.Text = "Relay3"
+        '
+        'chkMbRel4
+        '
+        Me.chkMbRel4.Location = New System.Drawing.Point(240, 23)
+        Me.chkMbRel4.Name = "chkMbRel4"
+        Me.chkMbRel4.Size = New System.Drawing.Size(65, 24)
+        Me.chkMbRel4.TabIndex = 3
+        Me.chkMbRel4.Text = "Relay4"
+        '
+        'chkMbRel5
+        '
+        Me.chkMbRel5.Location = New System.Drawing.Point(314, 23)
+        Me.chkMbRel5.Name = "chkMbRel5"
+        Me.chkMbRel5.Size = New System.Drawing.Size(64, 24)
+        Me.chkMbRel5.TabIndex = 4
+        Me.chkMbRel5.Text = "Relay5"
+        '
+        'chkMbRel6
+        '
+        Me.chkMbRel6.Location = New System.Drawing.Point(387, 23)
+        Me.chkMbRel6.Name = "chkMbRel6"
+        Me.chkMbRel6.Size = New System.Drawing.Size(69, 24)
+        Me.chkMbRel6.TabIndex = 5
+        Me.chkMbRel6.Text = "Relay6"
+        '
+        'txtMbDac1mV
+        '
+        Me.txtMbDac1mV.Location = New System.Drawing.Point(16, 55)
+        Me.txtMbDac1mV.Name = "txtMbDac1mV"
+        Me.txtMbDac1mV.Size = New System.Drawing.Size(80, 20)
+        Me.txtMbDac1mV.TabIndex = 6
+        Me.txtMbDac1mV.Text = "0"
+        '
+        'txtMbDac2mV
+        '
+        Me.txtMbDac2mV.Location = New System.Drawing.Point(102, 55)
+        Me.txtMbDac2mV.Name = "txtMbDac2mV"
+        Me.txtMbDac2mV.Size = New System.Drawing.Size(80, 20)
+        Me.txtMbDac2mV.TabIndex = 7
+        Me.txtMbDac2mV.Text = "0"
+        '
+        'btnMbApplyDac
+        '
+        Me.btnMbApplyDac.Location = New System.Drawing.Point(188, 53)
+        Me.btnMbApplyDac.Name = "btnMbApplyDac"
+        Me.btnMbApplyDac.Size = New System.Drawing.Size(90, 24)
+        Me.btnMbApplyDac.TabIndex = 8
+        Me.btnMbApplyDac.Text = "Apply DAC"
+        Me.btnMbApplyDac.UseVisualStyleBackColor = True
+        '
+        'dgvModbusMap
+        '
+        Me.dgvModbusMap.AllowUserToAddRows = False
+        Me.dgvModbusMap.AllowUserToDeleteRows = False
+        Me.dgvModbusMap.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill
+        Me.dgvModbusMap.Location = New System.Drawing.Point(12, 234)
+        Me.dgvModbusMap.Name = "dgvModbusMap"
+        Me.dgvModbusMap.ReadOnly = True
+        Me.dgvModbusMap.RowHeadersVisible = False
+        Me.dgvModbusMap.Size = New System.Drawing.Size(560, 430)
+        Me.dgvModbusMap.TabIndex = 2
         '
         'FormMain
         '
@@ -2343,6 +2622,12 @@ Partial Class FormMain
         Me.grpUserSettings.PerformLayout()
         Me.grpSerial.ResumeLayout(False)
         Me.grpSerial.PerformLayout()
+        Me.tabPageModbus.ResumeLayout(False)
+        Me.grpModbusConn.ResumeLayout(False)
+        Me.grpModbusConn.PerformLayout()
+        Me.grpModbusIO.ResumeLayout(False)
+        Me.grpModbusIO.PerformLayout()
+        CType(Me.dgvModbusMap, System.ComponentModel.ISupportInitialize).EndInit()
         Me.ResumeLayout(False)
 
     End Sub
@@ -2574,4 +2859,33 @@ Partial Class FormMain
     Friend WithEvents Label12 As Label
     Friend WithEvents LblTol As Label
     Friend WithEvents Label14 As Label
+
+    Friend WithEvents tabPageModbus As TabPage
+    Friend WithEvents grpModbusConn As GroupBox
+    Friend WithEvents cboMbComPort As ComboBox
+    Friend WithEvents cboMbBaud As ComboBox
+    Friend WithEvents cboMbDataBits As ComboBox
+    Friend WithEvents cboMbParity As ComboBox
+    Friend WithEvents cboMbStopBits As ComboBox
+    Friend WithEvents txtMbSlaveId As TextBox
+    Friend WithEvents btnMbRefreshPorts As Button
+    Friend WithEvents btnMbConnect As Button
+    Friend WithEvents btnMbDisconnect As Button
+    Friend WithEvents lblMbStatus As Label
+    Friend WithEvents chkMbAutoPoll As CheckBox
+    Friend WithEvents txtMbPollMs As TextBox
+    Friend WithEvents btnMbReadOnce As Button
+
+    Friend WithEvents grpModbusIO As GroupBox
+    Friend WithEvents chkMbRel1 As CheckBox
+    Friend WithEvents chkMbRel2 As CheckBox
+    Friend WithEvents chkMbRel3 As CheckBox
+    Friend WithEvents chkMbRel4 As CheckBox
+    Friend WithEvents chkMbRel5 As CheckBox
+    Friend WithEvents chkMbRel6 As CheckBox
+    Friend WithEvents txtMbDac1mV As TextBox
+    Friend WithEvents txtMbDac2mV As TextBox
+    Friend WithEvents btnMbApplyDac As Button
+
+    Friend WithEvents dgvModbusMap As DataGridView
 End Class
