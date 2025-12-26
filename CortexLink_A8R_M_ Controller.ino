@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include "esp_wifi.h"
 #include <WebServer.h>
 #include <Preferences.h>
 
@@ -35,6 +36,10 @@ Preferences g_prefs;
 
 
 static const String ETH_MAC = "A8:FD:B5:E1:D4:B3";
+static const String STA_MAC = "A8:FD:B5:E1:D4:B2";
+
+/* Static AP MAC address */
+static const String AP_MAC = "A8:FD:B5:E1:D4:B1";
 
 // Net prefs
 static const char* PREF_NS_NET = "netcfg";
@@ -273,14 +278,33 @@ static String getEthMacFromPrefs() {
     return mac;
 }
 
+bool parseMacString(const String& macStr, uint8_t* mac)
+{
+    if (macStr.length() != 17) return false;
+
+    for (int i = 0; i < 6; i++)
+    {
+        mac[i] = strtoul(macStr.substring(i * 3, i * 3 + 2).c_str(), NULL, 16);
+    }
+    return true;
+}
+
 // NEW: refresh MAC info registers (17 chars -> 9 regs)
 static void refreshMacInfoRegs() {
     // Ethernet MAC (from stored prefs, used by EthernetDriver/W5500 init)
     String ethMac = getEthMacFromPrefs();
 
     // WiFi MACs (available even if WiFi not connected)
-    String staMac = WiFi.macAddress();          // "AA:BB:CC:DD:EE:FF"
-    String apMac = WiFi.softAPmacAddress();    // valid after softAP, but still returns something
+  //String staMac = WiFi.macAddress();          // "AA:BB:CC:DD:EE:FF"
+    //String apMac = WiFi.softAPmacAddress();    // valid after softAP, but still returns something
+
+    g_prefs.begin("wifi_cfg", true);
+    String apMac = g_prefs.getString("ap_mac", "00:00:00:00:00:00");
+    g_prefs.end();
+
+    g_prefs.begin("wifi_cfg", true);
+    String staMac = g_prefs.getString("sta_mac", "00:00:00:00:00:00");
+    g_prefs.end();
 
     // Enforce max length 17 (we pack into 9 regs = 18 chars space)
     if (ethMac.length() > 17) ethMac = ethMac.substring(0, 17);
@@ -315,7 +339,7 @@ static uint16_t mb_dacRegs[4] = { 0 };      // 0 raw0,1 raw1,2 volts*100 ch0,3 v
 static uint16_t mb_rtcRegs[8] = { 0 };
 
 // ===== NEW: extra holding-register storage =====
-static uint16_t mb_sysInfoRegs[57] = { 0 }; // 100..156
+static uint16_t mb_sysInfoRegs[58] = { 0 }; // 100..157
 static uint16_t mb_netInfoRegs[50] = { 0 }; // 170..219
 static uint16_t mb_mbSetRegs[5] = { 0 }; // 230..234
 static uint16_t mb_serSetRegs[4] = { 0 }; // 240..243
@@ -327,7 +351,7 @@ struct ModbusSettings {
     uint8_t slaveId = 1;
     uint32_t baud = 38400;
     uint8_t dataBits = 8;     // 7 or 8
-    uint8_t parity = 1;       // 0=N 1=E 2=O
+    uint8_t parity = 0;       // 0=N 1=E 2=O
     uint8_t stopBits = 1;     // 1 or 2
 } g_mbCfg;
 
@@ -388,6 +412,7 @@ static String espMacToString() {
 // ======================================================================
 void startConfigPortal();
 void stopConfigPortal();
+void startConfigStation_WiFi();
 void loadNetworkConfig();
 bool startEthernet();
 void startTcpServer();
@@ -552,7 +577,7 @@ static void loadModbusConfig() {
     g_mbCfg.slaveId = g_prefs.getUChar(KEY_MB_SLAVEID, 1);
     g_mbCfg.baud = g_prefs.getULong(KEY_MB_BAUD, 38400);
 
-    g_mbCfg.parity = g_prefs.getUChar(KEY_MB_PARITY, 1);
+    g_mbCfg.parity = g_prefs.getUChar(KEY_MB_PARITY, 0);
     g_mbCfg.stopBits = g_prefs.getUChar(KEY_MB_STOPBITS, 1);
     g_mbCfg.dataBits = g_prefs.getUChar(KEY_MB_DATABITS, 8);
     g_prefs.end();
@@ -629,19 +654,19 @@ static void refreshSysInfoRegs() {
     // store without last colon segment? But requirement says it fits; it doesn't in 16.
     // Best within your constraints: store "AA:BB:CC:DD:EE:" (16) OR store without separators (12).
     // We'll store 16-char truncated so VB displays consistently:
-    if (mac.length() > 16) mac = mac.substring(0, 16);
+    if (mac.length() > 17) mac = mac.substring(0, 17);
 
     // Layout offsets inside mb_sysInfoRegs (reg100 base):
     writePackedStringToRegs(&mb_sysInfoRegs[0], 16, board);  // 100..115
     writePackedStringToRegs(&mb_sysInfoRegs[16], 16, sn);    // 116..131
     writePackedStringToRegs(&mb_sysInfoRegs[32], 8, mfg);    // 132..139
-    writePackedStringToRegs(&mb_sysInfoRegs[40], 8, mac);    // 140..147
-    writePackedStringToRegs(&mb_sysInfoRegs[48], 4, fw);     // 148..151
-    writePackedStringToRegs(&mb_sysInfoRegs[52], 4, hw);     // 152..155
+    writePackedStringToRegs(&mb_sysInfoRegs[40], 9, mac);    // 140..148
+    writePackedStringToRegs(&mb_sysInfoRegs[49], 4, fw);     // 149..152
+    writePackedStringToRegs(&mb_sysInfoRegs[53], 4, hw);     // 153..156
 
     uint16_t year = (uint16_t)yearS.toInt();
     if (year < 1970 || year > 2100) year = 2025;
-    mb_sysInfoRegs[56] = year; // 156
+    mb_sysInfoRegs[57] = year; // 157
 }
 
 
@@ -874,14 +899,14 @@ static void updateModbusSystemInfoRegs() {
     packAsciiToRegs(&mb_sysInfoRegs[16], 16, sn);
     // 132..139 manufacturer (16 chars = 8 regs)
     packAsciiToRegs(&mb_sysInfoRegs[32], 8, mfg);
-    // 140..147 MAC (16 chars = 8 regs)
-    packAsciiToRegs(&mb_sysInfoRegs[40], 8, mac);
-    // 148..151 FW (8 chars = 4 regs)
-    packAsciiToRegs(&mb_sysInfoRegs[48], 4, fw);
-    // 152..155 HW (8 chars = 4 regs)
-    packAsciiToRegs(&mb_sysInfoRegs[52], 4, hw);
-    // 156 year (uint16)
-    mb_sysInfoRegs[56] = (uint16_t)year.toInt();
+    // 140..148 MAC (17 chars = 9 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[40], 9, mac);
+    // 149..152 FW (8 chars = 4 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[49], 4, fw);
+    // 153..156 HW (8 chars = 4 regs)
+    packAsciiToRegs(&mb_sysInfoRegs[53], 4, hw);
+    // 157 year (uint16)
+    mb_sysInfoRegs[57] = (uint16_t)year.toInt();
 }
 
 static void updateModbusNetworkInfoRegs() {
@@ -937,7 +962,7 @@ static void updateModbusSettingsRegs() {
 // Add NEW Modbus callbacks
 static uint16_t mbSysInfoGet(TRegister* reg, uint16_t) {
     uint16_t idx = reg->address.address - MB_REG_SYSINFO_START;
-    return (idx < 57) ? mb_sysInfoRegs[idx] : 0;
+    return (idx < 58) ? mb_sysInfoRegs[idx] : 0;
 }
 static uint16_t mbNetInfoGet(TRegister* reg, uint16_t) {
     uint16_t idx = reg->address.address - MB_REG_NETINFO_START;
@@ -1181,6 +1206,8 @@ void setup() {
     g_di.updateAllInputs();
     g_lastDiBits = g_di.getInputState();
 
+    startConfigStation_WiFi();
+    stopConfigPortal();
     // WiFi portal decision
     g_prefs.begin(PREF_NS_NET, true);
     bool apDone = g_prefs.getBool(KEY_AP_DONE, false);
@@ -1341,9 +1368,9 @@ static void initModbus() {
         }
 
 
-        // ===== NEW: System/Info (BoardInfo) holding regs 100..156 =====
+        // ===== NEW: System/Info (BoardInfo) holding regs 100..158 =====
         refreshSysInfoRegs();
-        if (!g_modbus.addHoldingRegisterHandler(MB_REG_SYSINFO_START, 57, mbSysInfoGet)) {
+        if (!g_modbus.addHoldingRegisterHandler(MB_REG_SYSINFO_START, 58, mbSysInfoGet)) {
             ERROR_LOG("Failed to add BoardInfo holding registers");
         }
 
@@ -1667,10 +1694,34 @@ void loadNetworkConfig() {
 // WIFI AP CONFIG PORTAL (unchanged; not extended here)
 // ======================================================================
 void startConfigPortal() {
+
+    uint8_t mac[6];
+
     Serial.println(F("\n=== Starting WiFi AP Config Portal ==="));
     loadNetworkConfig();
 
+    if (!parseMacString(AP_MAC, mac))
+    {
+        Serial.println("Invalid AP MAC format");
+        return;
+    }
+
     WiFi.mode(WIFI_AP);
+
+    /* Set AP MAC address */
+    esp_err_t err = esp_wifi_set_mac(WIFI_IF_AP, mac);
+    if (err == ESP_OK)
+        Serial.println("AP MAC address set successfully");
+    else
+        Serial.printf("Failed to set AP MAC, error: %d\n", err);
+
+    /* Store AP MAC in flash (NVS) */
+    g_prefs.begin("wifi_cfg", false);
+    g_prefs.putString("ap_mac", AP_MAC);
+    g_prefs.end();
+
+    Serial.println("AP MAC stored in flash");
+
     WiFi.softAP(g_apSsid.c_str(), g_apPass.c_str());
     IPAddress apIp = WiFi.softAPIP();
     Serial.print(F("AP SSID: ")); Serial.println(g_apSsid);
@@ -1683,6 +1734,52 @@ void startConfigPortal() {
     g_http.onNotFound(handleHttpNotFound);
     g_http.begin();
 }
+
+void startConfigStation_WiFi() {
+    uint8_t mac[6];
+
+
+    if (!parseMacString(STA_MAC, mac))
+    {
+        Serial.println("Invalid MAC format");
+        return;
+    }
+
+    WiFi.mode(WIFI_STA);   // MUST be before setting MAC
+
+    esp_err_t err = esp_wifi_set_mac(WIFI_IF_STA, mac);
+    if (err == ESP_OK)
+        Serial.println("STA MAC address set successfully");
+    else
+        Serial.printf("Failed to set MAC, error: %d\n", err);
+
+    g_prefs.begin("wifi_cfg", false);
+    g_prefs.putString("sta_mac", STA_MAC);
+    g_prefs.end();
+
+    g_prefs.begin("wifi_cfg", true);
+    String storedMac = g_prefs.getString("sta_mac", "00:00:00:00:00:00");
+    g_prefs.end();
+
+    Serial.print("MAC read from flash: ");
+    Serial.println(storedMac);
+
+    uint8_t hwMac[6];
+    esp_wifi_get_mac(WIFI_IF_STA, hwMac);
+
+    Serial.print("Current STA MAC: ");
+    for (int i = 0; i < 6; i++)
+    {
+        if (hwMac[i] < 0x10) Serial.print("0");
+        Serial.print(hwMac[i], HEX);
+        if (i < 5) Serial.print(":");
+    }
+    Serial.println();
+
+}
+
+
+
 void stopConfigPortal() {
     g_http.stop();
     WiFi.softAPdisconnect(true);
