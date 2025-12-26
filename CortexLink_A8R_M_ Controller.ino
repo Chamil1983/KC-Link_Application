@@ -33,6 +33,9 @@ ModbusComm           g_modbus;
 // ======================================================================
 Preferences g_prefs;
 
+
+static const String ETH_MAC = "A8:FD:B5:E1:D4:B3";
+
 // Net prefs
 static const char* PREF_NS_NET = "netcfg";
 static const char* KEY_AP_DONE = "ap_done";
@@ -254,6 +257,51 @@ static const char* FW_VERSION_STR = "1.0.0";
 static const char* HW_VERSION_STR = "A8R-M-REV1";
 static const char* MANUFACTURER_STR = "Microcode Engineering";
 
+// ===== NEW: MAC info block =====
+static const uint16_t MB_REG_MACINFO_START = 290;     // 290..316 (27 regs)
+static const uint16_t MB_MACINFO_REGS = 27;
+
+// Add new holding-register storage
+static uint16_t mb_macInfoRegs[MB_MACINFO_REGS] = { 0 };
+
+// NEW: get Ethernet MAC from prefs (KEY_ETH_MAC is already used elsewhere)
+static String getEthMacFromPrefs() {
+
+    g_prefs.begin(PREF_NS_NET, true);
+    String mac = g_prefs.getString(KEY_ETH_MAC, ETH_MAC);
+    g_prefs.end();
+    return mac;
+}
+
+// NEW: refresh MAC info registers (17 chars -> 9 regs)
+static void refreshMacInfoRegs() {
+    // Ethernet MAC (from stored prefs, used by EthernetDriver/W5500 init)
+    String ethMac = getEthMacFromPrefs();
+
+    // WiFi MACs (available even if WiFi not connected)
+    String staMac = WiFi.macAddress();          // "AA:BB:CC:DD:EE:FF"
+    String apMac = WiFi.softAPmacAddress();    // valid after softAP, but still returns something
+
+    // Enforce max length 17 (we pack into 9 regs = 18 chars space)
+    if (ethMac.length() > 17) ethMac = ethMac.substring(0, 17);
+    if (staMac.length() > 17) staMac = staMac.substring(0, 17);
+    if (apMac.length() > 17)  apMac = apMac.substring(0, 17);
+
+    // Layout:
+    // 290..298 => ETH_MAC (9 regs)
+    // 299..307 => WIFI_STA_MAC (9 regs)
+    // 308..316 => WIFI_AP_MAC (9 regs)
+    writePackedStringToRegs(&mb_macInfoRegs[0], 9, ethMac);
+    writePackedStringToRegs(&mb_macInfoRegs[9], 9, staMac);
+    writePackedStringToRegs(&mb_macInfoRegs[18], 9, apMac);
+}
+
+// NEW: Modbus get callback for the MAC block
+static uint16_t mbMacInfoGet(TRegister* reg, uint16_t) {
+    uint16_t idx = reg->address.address - MB_REG_MACINFO_START;
+    return (idx < MB_MACINFO_REGS) ? mb_macInfoRegs[idx] : 0;
+}
+
 // ======================================================================
 // ===== MODBUS REGISTER STORAGE (mirrors MODBUS_Test.ino style) =====
 // ======================================================================
@@ -276,18 +324,18 @@ static uint16_t mb_buzRegs[6] = { 0 }; // 250..255
 // MODBUS settings (runtime)
 struct ModbusSettings {
     bool enabled = true;
-    uint8_t slaveId = 9600;
-    uint32_t baud = 3;
+    uint8_t slaveId = 1;
+    uint32_t baud = 38400;
     uint8_t dataBits = 8;     // 7 or 8
-    uint8_t parity = 0;       // 0=N 1=E 2=O
+    uint8_t parity = 1;       // 0=N 1=E 2=O
     uint8_t stopBits = 1;     // 1 or 2
 } g_mbCfg;
 
 struct SerialSettings {
-  uint32_t baud = 115200;
-  uint8_t dataBits = 8;
-  uint8_t parity = 0;
-  uint8_t stopBits = 1;
+    uint32_t baud = 115200;
+    uint8_t dataBits = 8;
+    uint8_t parity = 0;
+    uint8_t stopBits = 1;
 } g_serCfg;
 
 
@@ -502,9 +550,9 @@ static void loadModbusConfig() {
     g_prefs.begin(PREF_NS_MB, true);
     g_mbCfg.enabled = g_prefs.getBool(KEY_MB_ENABLED, true);
     g_mbCfg.slaveId = g_prefs.getUChar(KEY_MB_SLAVEID, 1);
-    g_mbCfg.baud = g_prefs.getULong(KEY_MB_BAUD, 9600);
+    g_mbCfg.baud = g_prefs.getULong(KEY_MB_BAUD, 38400);
 
-    g_mbCfg.parity = g_prefs.getUChar(KEY_MB_PARITY, 0);
+    g_mbCfg.parity = g_prefs.getUChar(KEY_MB_PARITY, 1);
     g_mbCfg.stopBits = g_prefs.getUChar(KEY_MB_STOPBITS, 1);
     g_mbCfg.dataBits = g_prefs.getUChar(KEY_MB_DATABITS, 8);
     g_prefs.end();
@@ -668,25 +716,26 @@ static uint32_t serialConfigUsb(uint8_t db, uint8_t par, uint8_t sb) {
     }
 }
 
+// ===== FIX: applyUsbSerialSettingsFromRegs() must treat baud as INDEX =====
 static void applyUsbSerialSettingsFromRegs() {
-    uint16_t baud = mb_serSetRegs[0];
+    // mb_serSetRegs[0] is BAUD INDEX, not raw baud
+    uint16_t baudIdx = mb_serSetRegs[0];
+    uint32_t baud = indexToBaud(baudIdx, 115200);
+
     uint8_t db = (uint8_t)mb_serSetRegs[1];
     uint8_t par = (uint8_t)mb_serSetRegs[2];
     uint8_t sb = (uint8_t)mb_serSetRegs[3];
 
-    if (baud < 1200) baud = 115200;
-    if (baud > 2000000) baud = 115200;
-
     uint32_t cfg = serialConfigUsb(db, par, sb);
 
-    // Re-init Serial (USB console)
     Serial.flush();
     Serial.end();
     delay(50);
     Serial.begin(baud, cfg);
     delay(50);
 
-    INFO_LOG("USB Serial updated via Modbus: baud=%u db=%u par=%u sb=%u", baud, db, par, sb);
+    INFO_LOG("USB Serial updated via Modbus: baudIdx=%u baud=%lu db=%u par=%u sb=%u",
+        (unsigned)baudIdx, (unsigned long)baud, db, par, sb);
 }
 
 static void refreshBuzzerRegsDefaults() {
@@ -1322,6 +1371,12 @@ static void initModbus() {
             ERROR_LOG("Failed to add Buzzer holding registers");
         }
 
+        // ===== NEW: MAC info holding regs 290..316 =====
+        refreshMacInfoRegs();
+        if (!g_modbus.addHoldingRegisterHandler(MB_REG_MACINFO_START, MB_MACINFO_REGS, mbMacInfoGet)) {
+            ERROR_LOG("Failed to add MACINFO holding registers");
+        }
+
         Serial.println("MODBUS register handlers configured");
     }
     else {
@@ -1407,6 +1462,7 @@ static void updateModbusData() {
     refreshNetInfoRegs();
     refreshMbSettingsRegs();
     refreshSerialSettingsRegs();
+    refreshMacInfoRegs();
 }
 
 // Input registers (FC04)
