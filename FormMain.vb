@@ -44,7 +44,7 @@ Partial Public Class FormMain
     Private Const MB_REG_RTC_START As Integer = 80        ' Holding regs
 
     ' ===== NEW HOLDING REG BLOCKS =====
-    Private Const MB_REG_SYSINFO_START As Integer = 100   ' 100..156
+    Private Const MB_REG_SYSINFO_START As Integer = 100   ' 100..157
     Private Const MB_REG_NETINFO_START As Integer = 170   ' 170..219 + 202..203 in middle
     Private Const MB_REG_MBSET_START As Integer = 230     ' 230..234
     Private Const MB_REG_SERSET_START As Integer = 240    ' 240..243
@@ -81,10 +81,10 @@ Partial Public Class FormMain
     Private Const HR_BOARD_NAME_START As UShort = 100US ' 100..115 (32 chars => 16 regs)
     Private Const HR_BOARD_SERIAL_START As UShort = 116US ' 116..131 (32 chars => 16 regs)
     Private Const HR_MANUFACTURER_START As UShort = 132US ' 132..139 (16 chars => 8 regs)
-    Private Const HR_MAC_START As UShort = 140US ' 144..151 (16 chars => 8 regs)
-    Private Const HR_FW_START As UShort = 148US ' 152..155 (8 chars => 4 regs)
-    Private Const HR_HW_START As UShort = 152US ' 156..159 (8 chars => 4 regs)
-    Private Const HR_YEAR As UShort = 156US ' uint16
+    Private Const HR_MAC_START As UShort = 140US ' 140..148 (17 chars => 9 regs)
+    Private Const HR_FW_START As UShort = 149US ' 159..152 (8 chars => 4 regs)
+    Private Const HR_HW_START As UShort = 153US ' 153..156 (8 chars => 4 regs)
+    Private Const HR_YEAR As UShort = 157US ' uint16
 
     ' NetworkInfo layout (HR / FC03)
     Private Const HR_IP_START As UShort = 170US ' 16 chars => 8 regs
@@ -373,7 +373,7 @@ Partial Public Class FormMain
             Dim rtc = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_RTC_START, 8)
 
             ' NEW blocks (Holding)
-            Dim sysInfo = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_SYSINFO_START, CUShort(57)) ' 100..157 inclusive = 57 regs
+            Dim sysInfo = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_SYSINFO_START, CUShort(58)) ' 100..158 inclusive = 58 regs
             Dim netInfo = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_NETINFO_START, CUShort(50)) ' 170..219 inclusive = 50 regs
             Dim mbSet = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_MBSET_START, CUShort(5))     ' 230..234
             Dim serSet = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_SERSET_START, CUShort(4))   ' 240..243
@@ -445,10 +445,10 @@ Partial Public Class FormMain
         mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 100, .Name = "BOARD_NAME", .Format = "32 chars (100..115)"})
         mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 116, .Name = "BOARD_SERIAL", .Format = "32 chars (116..131)"})
         mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 132, .Name = "MANUFACTURER", .Format = "16 chars (132..139)"})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 140, .Name = "MAC", .Format = "16 chars (140..147)"})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 148, .Name = "FW_VERSION", .Format = "8 chars (148..151)"})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 152, .Name = "HW_VERSION", .Format = "8 chars (152..155)"})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = 156, .Name = "MAKE_YEAR", .Format = "uint16"})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 140, .Name = "MAC", .Format = "17 chars (140..148)"})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 149, .Name = "FW_VERSION", .Format = "8 chars (149..152)"})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo (HR packed ASCII)", .Kind = "HR", .Address = 153, .Name = "HW_VERSION", .Format = "8 chars (153..156)"})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = 157, .Name = "MAKE_YEAR", .Format = "uint16"})
 
         mbRows.Add(New MbRow With {.Section = "System / NetworkInfo (HR packed ASCII)", .Kind = "HR", .Address = 170, .Name = "IP", .Format = "16 chars (170..177)"})
         mbRows.Add(New MbRow With {.Section = "System / NetworkInfo (HR packed ASCII)", .Kind = "HR", .Address = 178, .Name = "MASK", .Format = "16 chars (178..185)"})
@@ -505,6 +505,8 @@ Partial Public Class FormMain
             dgvModbusMap.Columns.Add(New DataGridViewTextBoxColumn() With {.Name = "colFmt", .HeaderText = "Format", .Width = 220})
             dgvModbusMap.Columns.Add(New DataGridViewTextBoxColumn() With {.Name = "colVal", .HeaderText = "Live Value", .Width = 180})
 
+
+
             dgvModbusMap.RowCount = mbRows.Count
 
             RemoveHandler dgvModbusMap.CellValueNeeded, AddressOf DgvModbusMap_CellValueNeeded
@@ -515,6 +517,62 @@ Partial Public Class FormMain
             dgvModbusMap.ResumeLayout()
         End Try
     End Sub
+
+    Private Sub DataGridView1_RowPrePaint(
+    sender As Object,
+    e As DataGridViewRowPrePaintEventArgs
+) Handles dgvModbusMap.RowPrePaint
+
+        Dim rowIndex As Integer = e.RowIndex
+
+        ' Section 1 (Rows 0–4)
+        If rowIndex >= 0 AndAlso rowIndex <= 7 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(174, 228, 249)
+
+            ' Section 2 (Rows 5–9)
+        ElseIf rowIndex >= 8 AndAlso rowIndex <= 13 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(157, 255, 157)
+
+            ' Section 3 (Rows 10–14)
+        ElseIf rowIndex >= 14 AndAlso rowIndex <= 21 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.LightYellow
+
+        ElseIf rowIndex >= 22 AndAlso rowIndex <= 25 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(247, 193, 157)
+
+        ElseIf rowIndex >= 26 AndAlso rowIndex <= 29 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(198, 198, 255)
+
+        ElseIf rowIndex >= 30 AndAlso rowIndex <= 37 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(181, 155, 106)
+
+        ElseIf rowIndex >= 38 AndAlso rowIndex <= 43 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(255, 145, 200)
+
+        ElseIf rowIndex >= 44 AndAlso rowIndex <= 50 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(116, 215, 252)
+
+        ElseIf rowIndex >= 51 AndAlso rowIndex <= 58 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(182, 148, 252)
+
+        ElseIf rowIndex >= 59 AndAlso rowIndex <= 63 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(132, 255, 193)
+
+        ElseIf rowIndex >= 64 AndAlso rowIndex <= 67 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(255, 255, 149)
+
+        ElseIf rowIndex >= 68 AndAlso rowIndex <= 73 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(85, 255, 85)
+
+        ElseIf rowIndex >= 74 AndAlso rowIndex <= 76 Then
+            dgvModbusMap.Rows(rowIndex).DefaultCellStyle.BackColor = Color.FromArgb(252, 159, 133)
+
+        End If
+
+
+    End Sub
+
+
 
     Private Sub DgvModbusMap_CellValueNeeded(sender As Object, e As DataGridViewCellValueEventArgs)
         If Not _mbGridBuilt Then Return
@@ -593,7 +651,7 @@ Partial Public Class FormMain
                         val = rtc(a - MB_REG_RTC_START).ToString()
 
                         ' NEW: BoardInfo / NetworkInfo / settings / buzzer
-                    ElseIf a >= MB_REG_SYSINFO_START AndAlso a <= 156 Then
+                    ElseIf a >= MB_REG_SYSINFO_START AndAlso a <= 157 Then
                         val = DecodeSystemInfoField(a, sysInfo)
 
                     ElseIf a >= MB_REG_NETINFO_START AndAlso a <= 219 Then
@@ -667,7 +725,7 @@ Partial Public Class FormMain
     End Function
 
     Private Function DecodeSystemInfoField(addr As Integer, sysInfo() As UShort) As String
-        If sysInfo Is Nothing OrElse sysInfo.Length < 57 Then Return ""
+        If sysInfo Is Nothing OrElse sysInfo.Length < 58 Then Return ""
 
         If addr >= 100 AndAlso addr <= 115 Then
             Return DecodeAsciiBlock(sysInfo, 0, 16)
@@ -676,14 +734,14 @@ Partial Public Class FormMain
         ElseIf addr >= 132 AndAlso addr <= 139 Then
             ' manufacturer is 16 chars max; firmware enforces this now
             Return DecodeAsciiBlock(sysInfo, 32, 8)
-        ElseIf addr >= 140 AndAlso addr <= 147 Then
-            Return DecodeAsciiBlock(sysInfo, 40, 8)
-        ElseIf addr >= 148 AndAlso addr <= 151 Then
-            Return DecodeAsciiBlock(sysInfo, 48, 4)
-        ElseIf addr >= 152 AndAlso addr <= 155 Then
-            Return DecodeAsciiBlock(sysInfo, 52, 4)
-        ElseIf addr = 156 Then
-            Return sysInfo(56).ToString()
+        ElseIf addr >= 140 AndAlso addr <= 148 Then
+            Return DecodeAsciiBlock(sysInfo, 40, 9)
+        ElseIf addr >= 149 AndAlso addr <= 152 Then
+            Return DecodeAsciiBlock(sysInfo, 49, 4)
+        ElseIf addr >= 153 AndAlso addr <= 156 Then
+            Return DecodeAsciiBlock(sysInfo, 53, 4)
+        ElseIf addr = 157 Then
+            Return sysInfo(57).ToString()
         End If
 
         Return ""
@@ -1030,7 +1088,7 @@ Partial Public Class FormMain
     Private Sub MbPollSystemBlocks()
         If Not mbConnected OrElse mbMaster Is Nothing Then Return
 
-        ' Read BoardInfo: 100..156 => 57 registers
+        ' Read BoardInfo: 100..157 => 58 registers
         Dim boardRegs = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_SYS_BOARDINFO_START, CUShort(MB_REG_SYS_BOARDINFO_END - MB_REG_SYS_BOARDINFO_START + 1))
 
         ' Read NetworkInfo: 170..219 => 50 registers
@@ -1077,7 +1135,7 @@ Partial Public Class FormMain
                     Case HR_MANUFACTURER_START
                         val = DecodeAsciiFromHoldingRegs(boardRegs, HrIndex(MB_REG_SYS_BOARDINFO_START, HR_MANUFACTURER_START), 8, 16)
                     Case HR_MAC_START
-                        val = DecodeAsciiFromHoldingRegs(boardRegs, HrIndex(MB_REG_SYS_BOARDINFO_START, HR_MAC_START), 8, 16)
+                        val = DecodeAsciiFromHoldingRegs(boardRegs, HrIndex(MB_REG_SYS_BOARDINFO_START, HR_MAC_START), 9, 17)
                     Case HR_FW_START
                         val = DecodeAsciiFromHoldingRegs(boardRegs, HrIndex(MB_REG_SYS_BOARDINFO_START, HR_FW_START), 4, 8)
                     Case HR_HW_START
@@ -1158,10 +1216,10 @@ Partial Public Class FormMain
         mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_BOARD_NAME_START, .Name = "BOARD_NAME", .Format = "ASCII packed (32 chars, HR100..115)", .ValueText = ""})
         mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_BOARD_SERIAL_START, .Name = "BOARD_SERIAL", .Format = "ASCII packed (32 chars, HR116..131)", .ValueText = ""})
         mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_MANUFACTURER_START, .Name = "MANUFACTURER", .Format = "ASCII packed (16 chars, HR132..139)", .ValueText = ""})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_MAC_START, .Name = "MAC", .Format = "ASCII packed (16 chars, HR140..147)", .ValueText = ""})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_FW_START, .Name = "FW_VERSION", .Format = "ASCII packed (8 chars, HR148..151)", .ValueText = ""})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_HW_START, .Name = "HW_VERSION", .Format = "ASCII packed (8 chars, HR152..155)", .ValueText = ""})
-        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_YEAR, .Name = "MAKE_YEAR", .Format = "uint16 (HR156)", .ValueText = ""})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_MAC_START, .Name = "MAC", .Format = "ASCII packed (17 chars, HR140..148)", .ValueText = ""})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_FW_START, .Name = "FW_VERSION", .Format = "ASCII packed (8 chars, HR149..152)", .ValueText = ""})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_HW_START, .Name = "HW_VERSION", .Format = "ASCII packed (8 chars, HR153..156)", .ValueText = ""})
+        mbRows.Add(New MbRow With {.Section = "System / BoardInfo", .Kind = "HR", .Address = HR_YEAR, .Name = "MAKE_YEAR", .Format = "uint16 (HR157)", .ValueText = ""})
 
         ' ---- NetworkInfo ----
         mbRows.Add(New MbRow With {.Section = "System / NetworkInfo", .Kind = "HR", .Address = HR_IP_START, .Name = "IP", .Format = "ASCII packed (16 chars, HR170..177)", .ValueText = ""})
