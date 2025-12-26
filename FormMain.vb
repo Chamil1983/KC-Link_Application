@@ -49,6 +49,9 @@ Partial Public Class FormMain
     Private Const MB_REG_MBSET_START As Integer = 230     ' 230..234
     Private Const MB_REG_SERSET_START As Integer = 240    ' 240..243
     Private Const MB_REG_BUZZ_START As Integer = 250      ' 250..255
+    ' ===== NEW: MAC info block =====
+    Private Const MB_REG_MACINFO_START As Integer = 290   ' 290..316
+    Private Const MB_MACINFO_REGS As Integer = 27
 
     Private Const NUM_DIGITAL_INPUTS As Integer = 8
     Private Const NUM_RELAY_OUTPUTS As Integer = 6
@@ -69,6 +72,10 @@ Partial Public Class FormMain
     Private Const MB_REG_SYS_SERSET_START As UShort = 240US  ' 240..243
 
     Private Const MB_REG_SYS_BUZZ_START As UShort = 250US    ' 250..255
+
+    Private Const HR_ETH_MAC_START As UShort = 290US      ' 9 regs (17 chars)
+    Private Const HR_WIFI_STA_MAC_START As UShort = 299US ' 9 regs
+    Private Const HR_WIFI_AP_MAC_START As UShort = 308US  ' 9 regs
 
     ' BoardInfo layout (HR / FC03)
     Private Const HR_BOARD_NAME_START As UShort = 100US ' 100..115 (32 chars => 16 regs)
@@ -372,10 +379,13 @@ Partial Public Class FormMain
             Dim serSet = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_SERSET_START, CUShort(4))   ' 240..243
             Dim buz = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_BUZZ_START, CUShort(6))        ' 250..255
 
+            ' ===== NEW: MAC info block 290..316 =====
+            Dim macInfo = mbMaster.ReadHoldingRegisters(mbSlaveId, MB_REG_MACINFO_START, CUShort(MB_MACINFO_REGS))
+
             ApplyModbusToDashboard(di, coils, ai, temps, hums, ds, dac, rtc)
 
             ' NEW: update virtual grid values (fast)
-            UpdateModbusMapLiveValuesVirtual(di, coils, ai, temps, hums, ds, dac, rtc, sysInfo, netInfo, mbSet, serSet, buz)
+            UpdateModbusMapLiveValuesVirtual(di, coils, ai, temps, hums, ds, dac, rtc, sysInfo, netInfo, mbSet, serSet, buz, macInfo)
 
         Catch ex As Exception
             LogLine("Modbus poll error: " & ex.Message)
@@ -467,6 +477,11 @@ Partial Public Class FormMain
         mbRows.Add(New MbRow With {.Section = "Buzzer Control", .Kind = "HR", .Address = 254, .Name = "BUZ_PATTERN_REPEATS", .Format = "count"})
         mbRows.Add(New MbRow With {.Section = "Buzzer Control", .Kind = "HR", .Address = 255, .Name = "BUZ_CMD", .Format = "write 1=beep 2=pattern 0=stop"})
 
+        ' ===== NEW: MAC info rows =====
+        mbRows.Add(New MbRow With {.Section = "System / MAC Info (HR packed ASCII)", .Kind = "HR", .Address = 290, .Name = "ETH_MAC", .Format = "17 chars (290..298)"})
+        mbRows.Add(New MbRow With {.Section = "System / MAC Info (HR packed ASCII)", .Kind = "HR", .Address = 299, .Name = "WIFI_STA_MAC", .Format = "17 chars (299..307)"})
+        mbRows.Add(New MbRow With {.Section = "System / MAC Info (HR packed ASCII)", .Kind = "HR", .Address = 308, .Name = "WIFI_AP_MAC", .Format = "17 chars (308..316)"})
+
         ' live values array
         _mbLiveValues = New String(mbRows.Count - 1) {}
 
@@ -534,7 +549,8 @@ Partial Public Class FormMain
                                                  netInfo() As UShort,
                                                  mbSet() As UShort,
                                                  serSet() As UShort,
-                                                 buz() As UShort)
+                                                 buz() As UShort,
+                                                 macInfo() As UShort)
 
         If Not _mbGridBuilt Then Return
 
@@ -559,9 +575,9 @@ Partial Public Class FormMain
                         val = (ai(j) / 100.0).ToString("0.00")
                     ElseIf a >= MB_REG_TEMP_START AndAlso a < MB_REG_TEMP_START + NUM_DHT_SENSORS Then
                         val = (temps(a - MB_REG_TEMP_START) / 100.0).ToString("0.00")
-                        ElseIf a >= MB_REG_HUM_START AndAlso a < MB_REG_HUM_START + NUM_DHT_SENSORS Then
+                    ElseIf a >= MB_REG_HUM_START AndAlso a < MB_REG_HUM_START + NUM_DHT_SENSORS Then
                         val = (hums(a - MB_REG_HUM_START) / 100.0).ToString("0.00")
-                        ElseIf a >= MB_REG_DS18B20_START AndAlso a < MB_REG_DS18B20_START + MAX_DS18B20_SENSORS Then
+                    ElseIf a >= MB_REG_DS18B20_START AndAlso a < MB_REG_DS18B20_START + MAX_DS18B20_SENSORS Then
                         Dim j = a - MB_REG_DS18B20_START
                         If ds(j) = 0 Then val = "invalid" Else val = ((ds(j) / 100.0) - 100.0).ToString("0.00")
                     End If
@@ -591,7 +607,10 @@ Partial Public Class FormMain
 
                     ElseIf a >= MB_REG_BUZZ_START AndAlso a <= 255 Then
                         val = DecodeSimpleHrField(a, buz, MB_REG_BUZZ_START)
+                    ElseIf a >= MB_REG_MACINFO_START AndAlso a <= 316 Then
+                        val = DecodeMacInfoField(a, macInfo)
                     End If
+
             End Select
 
             _mbLiveValues(i) = val
@@ -618,6 +637,20 @@ Partial Public Class FormMain
         End If
 
         Return regs(idx).ToString()
+    End Function
+
+    Private Function DecodeMacInfoField(addr As Integer, macInfo() As UShort) As String
+        If macInfo Is Nothing OrElse macInfo.Length < MB_MACINFO_REGS Then Return ""
+
+        If addr >= 290 AndAlso addr <= 298 Then
+            Return DecodeAsciiBlock(macInfo, 0, 9) ' ETH_MAC
+        ElseIf addr >= 299 AndAlso addr <= 307 Then
+            Return DecodeAsciiBlock(macInfo, 9, 9) ' WIFI_STA_MAC
+        ElseIf addr >= 308 AndAlso addr <= 316 Then
+            Return DecodeAsciiBlock(macInfo, 18, 9) ' WIFI_AP_MAC
+        End If
+
+        Return ""
     End Function
 
     ' Packed ASCII: 2 chars per 16-bit register (HiByte then LoByte)
@@ -3449,4 +3482,3 @@ End Class
 
 
 ' ... keep your existing FormMain code ...
-
