@@ -23,12 +23,15 @@
 #include "DHT_Sensors.h"
 #include "RTCManager.h"
 
+
 #ifndef MQTT_RETAIN_SNAPSHOT
 #define MQTT_RETAIN_SNAPSHOT 1
 #endif
 #ifndef MQTT_RETAIN_STATES
 #define MQTT_RETAIN_STATES 0
 #endif
+
+
 
 struct MQTTConfig {
     String   broker;
@@ -50,6 +53,8 @@ class MQTTManager {
 public:
     enum NetMode : uint8_t { NET_WIFI = 0, NET_ETH = 1 };
     explicit MQTTManager();
+    
+    
 
     bool beginWifi(DigitalInputDriver* di,
         RelayDriver* rel,
@@ -127,6 +132,8 @@ private:
     MQTTConfig   _cfg;
 
     Preferences _prefs;
+
+
     static constexpr const char* PREF_NS = "mqtt";
     static constexpr const char* KEY_BROKER = "broker";
     static constexpr const char* KEY_PORT = "port";
@@ -140,6 +147,8 @@ private:
     static constexpr const char* KEY_ETH_DNS = "eth_dns";
     static constexpr const char* KEY_ETH_GW = "eth_gw";
     static constexpr const char* KEY_ETH_MASK = "eth_mask";
+
+
 
     uint32_t      _publishInterval = 1000;
     unsigned long _lastPub = 0;
@@ -167,6 +176,7 @@ private:
 
     void publishSnapshot(bool forceAll = false);
     void publishSys(bool force);
+    void publishDeviceInfo(bool force);
     void publishDI(bool force);
     void publishRelays(bool force);
     void publishAI(bool force);
@@ -182,6 +192,10 @@ private:
     void cmdDacMvSet(uint8_t ch1, int mv);
     void cmdDacRawSet(uint8_t ch1, uint16_t raw);
     void cmdRequestFull();
+    void cmdRtcSet(const String& iso);
+    void cmdBuzzerBeepJson(const String& json);
+    void cmdBuzzerPatternJson(const String& json);
+    void cmdBuzzerStop();
 
     static String trimCopy(const String& s);
     static int toIntSafe(const String& s, int def = 0);

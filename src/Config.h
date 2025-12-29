@@ -87,4 +87,11 @@
 #define MB_REG_DAC_START       70
 #define MB_REG_RTC_START       80
 
+// ===== NEW: System / Network / Settings / Buzzer holding registers =====
+#define MB_REG_SYSINFO_START   100   // 100..156
+#define MB_REG_NETINFO_START   170   // 170..219
+#define MB_REG_MBSET_START     230   // 230..234
+#define MB_REG_SERSET_START    240   // 240..243
+#define MB_REG_BUZZ_START      250   // 250..255
+
 #endif // CONFIG_H

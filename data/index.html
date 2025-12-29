@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CortexLink A8R‑M MQTT Dashboard</title>
+
+  <link rel="stylesheet" href="/style.css" />
+  <!-- Offline icons (replace font-awesome CDN) -->
+  <link rel="stylesheet" href="/fa.css" />
+
+  <!-- Offline MQTT.js (replace unpkg CDN) -->
+  <script src="/mqtt.min.js"></script>
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo"><span class="ico">⎈</span></div>
+      <div>
+        <div class="title">CortexLink A8R‑M</div>
+        <div class="subtitle">MQTT Web Dashboard</div>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <div class="pill" id="ui-pill-mqtt">
+        <span class="dot" id="ui-dot-mqtt"></span>
+        <span id="ui-mqtt-status">MQTT: Not configured</span>
+      </div>
+
+      <div class="pill">
+        <span class="ico">📶</span>
+        <span id="ui-ap-ssid">AP: -</span>
+      </div>
+
+      <div class="pill">
+        <span class="ico">🌐</span>
+        <span id="ui-ap-ip">ESP IP: -</span>
+      </div>
+
+      <div class="pill">
+        <span class="ico">⏱</span>
+        <span id="ui-rtc">RTC: --</span>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tabbtn active" data-tab="dashboard">Dashboard</button>
+    <button class="tabbtn" data-tab="settings">Network & RTC</button>
+  </nav>
+
+  <!-- ========================= Dashboard Tab ========================= -->
+  <div id="tab-dashboard" class="tabpage active">
+    
+  <main class="grid">
+      <section class="card">
+        <div class="card-title"><span class="ico">ℹ</span> Device Overview</div>
+
+        <div class="kv">
+          <div class="k">ClientId</div><div class="v" id="ui-clientid">-</div>
+          <div class="k">Base</div><div class="v" id="ui-fullbase">-</div>
+          <div class="k">Online</div><div class="v" id="ui-online">Unknown</div>
+
+          <div class="k">Board</div><div class="v" id="ui-board">-</div>
+          <div class="k">Serial</div><div class="v" id="ui-serial">-</div>
+          <div class="k">FW</div><div class="v" id="ui-fw">-</div>
+          <div class="k">HW</div><div class="v" id="ui-hw">-</div>
+          <div class="k macgroup">ETH</div><div class="v macgroup" id="ui-mac-eth">-</div>
+          <div class="k macgroup">STA</div><div class="v macgroup" id="ui-mac-sta">-</div>
+          <div class="k macgroup">AP</div><div class="v macgroup" id="ui-mac-ap">-</div>
+          <div class="k macgroup">EFUSE MAC</div><div class="v macgroup" id="ui-mac-efuse">-</div>
+          <div class="k">Manufacturer</div><div class="v" id="ui-mfg">-</div>
+          <div class="k">Year</div><div class="v" id="ui-year">-</div>
+        </div>
+
+        <div class="actions">
+          <button class="btn small" id="btn-req-snapshot">Request Snapshot</button>
+        </div>
+
+        <div class="errorbox" id="ui-errorbox" style="display:none;">
+          <div class="errorbox-title">Connection / Debug</div>
+          <pre class="errorbox-text" id="ui-errortext"></pre>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Relays</div>
+        <div class="relay-grid" id="ui-relays"></div>
+        <div class="actions">
+          <button class="btn" id="btn-relays-all-off">All OFF</button>
+          <button class="btn primary" id="btn-relays-all-on">All ON</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Digital Inputs</div>
+        <div class="di-grid" id="ui-dis"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Analog Inputs</div>
+        <div class="analog-grid" id="ui-ais"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Sensors</div>
+        <div class="sensor-grid" id="ui-sensors"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">DAC Outputs</div>
+        <div class="dac-grid" id="ui-dacs"></div>
+      </section>
+
+      <section class="card full">
+        <div class="card-title">Buzzer</div>
+        <div class="buzzer-row">
+          <label>Freq (Hz) <input id="buz-freq" type="number" min="1" value="2000"></label>
+          <label>On (ms) <input id="buz-on" type="number" min="1" value="200"></label>
+          <label>Off (ms) <input id="buz-off" type="number" min="0" value="200"></label>
+          <label>Repeats <input id="buz-rep" type="number" min="1" value="5"></label>
+          <button class="btn primary" id="btn-buz-start">Pattern</button>
+          <button class="btn" id="btn-buz-beep">Beep</button>
+          <button class="btn" id="btn-buz-stop">Stop</button>
+        </div>
+        <div class="hint">
+          Offline UI served by ESP32. Browser connects to Mosquitto (WebSockets) on the PC (192.168.4.2).
+        </div>
+      </section>
+    </main>
+</div>
+
+  <div id="tab-settings" class="tabpage">
+    <main class="grid">
+      <section class="card full">
+        <div class="card-title"><span class="ico">⚙</span> Network & RTC Settings</div>
+
+        <div class="formgrid">
+          <div class="fieldset">
+            <div class="legend">WiFi Access Point (AP)</div>
+            <label>AP SSID <input id="cfg-ap-ssid" type="text" placeholder="A8RM-SETUP"></label>
+            <label>AP Password <input id="cfg-ap-pass" type="text" placeholder="cortexlink"></label>
+            <div class="muted">AP IP (current): <span class="mono" id="cfg-ap-ip">—</span></div>
+          </div>
+
+          <div class="fieldset">
+            <div class="legend">WiFi Station (STA)</div>
+            <label class="chk"><input id="cfg-sta-en" type="checkbox"> Enable STA mode</label>
+            <label>STA SSID <input id="cfg-sta-ssid" type="text" placeholder="YourWiFi"></label>
+            <label>STA Password <input id="cfg-sta-pass" type="text" placeholder="password"></label>
+            <label class="chk"><input id="cfg-sta-dhcp" type="checkbox" checked> DHCP</label>
+            <label>Static IP <input id="cfg-sta-ip" type="text" placeholder="192.168.1.50"></label>
+            <label>Subnet Mask <input id="cfg-sta-mask" type="text" placeholder="255.255.255.0"></label>
+            <label>Gateway <input id="cfg-sta-gw" type="text" placeholder="192.168.1.1"></label>
+            <label>DNS <input id="cfg-sta-dns" type="text" placeholder="8.8.8.8"></label>
+            <div class="muted">Connected: <span class="mono" id="cfg-sta-conn">—</span> | IP now: <span class="mono" id="cfg-sta-ip-now">—</span></div>
+          </div>
+
+          <div class="fieldset">
+            <div class="legend">Ethernet (W5500)</div>
+            <label class="chk"><input id="cfg-eth-dhcp" type="checkbox" checked> DHCP</label>
+            <label>MAC <input id="cfg-eth-mac" type="text" placeholder="A8:FD:B5:E1:D4:B3"></label>
+            <label>Static IP <input id="cfg-eth-ip" type="text" placeholder="192.168.1.40"></label>
+            <label>Subnet Mask <input id="cfg-eth-mask" type="text" placeholder="255.255.255.0"></label>
+            <label>Gateway <input id="cfg-eth-gw" type="text" placeholder="192.168.1.1"></label>
+            <label>DNS <input id="cfg-eth-dns" type="text" placeholder="8.8.8.8"></label>
+            <div class="muted">IP now: <span class="mono" id="cfg-eth-ip-now">—</span></div>
+          </div>
+
+          <div class="fieldset">
+            <div class="legend">TCP Server</div>
+            <label>TCP Port <input id="cfg-tcp-port" type="number" min="1" max="65535" value="5000"></label>
+            <div class="muted">This is the same TCP control port used by your VB.NET application.</div>
+          </div>
+
+          <div class="fieldset">
+            <div class="legend">RTC</div>
+            <div class="muted">Current RTC: <span class="mono" id="rtc-now">—</span></div>
+            <div class="muted">Unix: <span class="mono" id="rtc-unix">—</span></div>
+            <div class="actions">
+              <button class="btn" id="btn-rtc-refresh">Refresh</button>
+              <button class="btn primary" id="btn-rtc-set-browser">Set from Browser</button>
+            </div>
+            <div class="pill" id="rtc-status">—</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" id="btn-net-reload">Reload</button>
+          <button class="btn primary" id="btn-net-apply">Save + Apply</button>
+          <button class="btn danger" id="btn-net-reboot">Save + Reboot</button>
+          <div class="pill" id="net-status">—</div>
+        </div>
+
+        <div class="hint">
+          Notes: Applying Ethernet (W5500) IP settings may require a reboot. AP stays enabled for the dashboard.
+        </div>
+  <footer class="footer">
+    <div>ESP32 serves UI via HTTP. Browser connects to Mosquitto via WebSockets.</div>
+    <div class="small" id="ui-debug">Loading /api/mqttinfo…</div>
+  </footer>
+
+  <script src="/script.js"></script>
+</body>
+</html>

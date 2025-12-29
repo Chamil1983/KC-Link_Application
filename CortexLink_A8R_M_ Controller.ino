@@ -1,10 +1,12 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <WiFi.h>
 #include "esp_wifi.h"
 #include <WebServer.h>
 #include <Preferences.h>
+#include <LittleFS.h>
 
 #include "src/Config.h"
+#include "src/Settings.h"
 #include "src/Debug.h"
 #include "src/DigitalInputDriver.h"
 #include "src/RelayDriver.h"
@@ -14,6 +16,8 @@
 #include "src/RTCManager.h"
 #include "src/EthernetDriver.h"
 #include "src/ModbusComm.h"
+#include "src/MQTT_Manager.h"
+#include "src/WebDashboard.h"
 
 // ======================================================================
 // GLOBAL DRIVER INSTANCES
@@ -34,98 +38,23 @@ ModbusComm           g_modbus;
 // ======================================================================
 Preferences g_prefs;
 
+// ===== MQTT + Dashboard (NEW) =====
+MQTTManager g_mqtt;
 
-static const String ETH_MAC = "A8:FD:B5:E1:D4:B3";
-static const String STA_MAC = "A8:FD:B5:E1:D4:B2";
 
-/* Static AP MAC address */
-static const String AP_MAC = "A8:FD:B5:E1:D4:B1";
 
-// Net prefs
-static const char* PREF_NS_NET = "netcfg";
-static const char* KEY_AP_DONE = "ap_done";
-static const char* KEY_ETH_DHCP = "eth_dhcp";
-static const char* KEY_ETH_MAC = "eth_mac";
-static const char* KEY_ETH_IP = "eth_ip";
-static const char* KEY_ETH_MASK = "eth_mask";
-static const char* KEY_ETH_GW = "eth_gw";
-static const char* KEY_ETH_DNS = "eth_dns";
-static const char* KEY_TCP_PORT = "tcp_port";
-
-// Store AP SSID/pass in prefs too
-static const char* KEY_AP_SSID = "ap_ssid";
-static const char* KEY_AP_PASS = "ap_pass";
-
-// Store last runtime DHCP lease results
-static const char* KEY_ETH_IP_CUR = "eth_ip_cur";
-static const char* KEY_ETH_MASK_CUR = "eth_m_cur";
-static const char* KEY_ETH_GW_CUR = "eth_gw_cur";
-static const char* KEY_ETH_DNS_CUR = "eth_dns_cur";
-
-// NEW: analog input voltage range config (software scaling only)
-static const char* KEY_AI_VRANGE = "ai_vrng"; // 5 or 10
-
-// ===== NEW (MODBUS prefs) =====
-static const char* PREF_NS_MB = "mbcfg";
-static const char* KEY_MB_ENABLED = "en";      // bool
-static const char* KEY_MB_SLAVEID = "sid";     // u8
-static const char* KEY_MB_BAUD = "baud";       // u32
-static const char* KEY_MB_PARITY = "par";      // u8 0=N 1=E 2=O
-static const char* KEY_MB_STOPBITS = "sb";     // u8 1 or 2
-static const char* KEY_MB_DATABITS = "db";     // u8 7 or 8
-
-// Serial settings prefs namespace/keys (NEW)
-static const char* PREF_NS_SER = "sercfg";
-static const char* KEY_SER_BAUD = "baud";
-static const char* KEY_SER_PAR = "par";   // 0=N 1=O 2=E
-static const char* KEY_SER_SB = "sb";    // 1/2
-static const char* KEY_SER_DB = "db";    // 7/8
-
-// Scheduler prefs (fixed maximum number of schedules)
-static const uint8_t  SCHED_MAX = 8;
-static const char* PREF_NS_SCHED_META = "schedm";
-static const char* KEY_SCHED_COUNT = "count";
-
-// Keys within each schedule namespace "sch0".."sch7"
-static const char* KEY_S_EN = "en";
-static const char* KEY_S_MODE = "mode";   // expanded
-static const char* KEY_S_DI = "di";       // 1..8
-static const char* KEY_S_EDGE = "edge";   // 0=R 1=F 2=B
-static const char* KEY_S_ST = "st";       // start minutes
-static const char* KEY_S_ENM = "enM";     // end minutes
-static const char* KEY_S_RECUR = "recur"; // kept for compat
-static const char* KEY_S_DAYS = "days";   // bitmask Mon..Sun (bit0=Mon..bit6=Sun)
-
-static const char* KEY_S_RMASK = "rmask"; // 0..63
-static const char* KEY_S_RACT = "ract";   // 0=ON 1=OFF 2=TOGGLE
-static const char* KEY_S_D1MV = "d1mv";
-static const char* KEY_S_D2MV = "d2mv";
-static const char* KEY_S_D1R = "d1r";
-static const char* KEY_S_D2R = "d2r";
-static const char* KEY_S_BUZEN = "buzen";
-static const char* KEY_S_BUZF = "buzf";
-static const char* KEY_S_BUZON = "buzon";
-static const char* KEY_S_BUZOFF = "buzoff";
-static const char* KEY_S_BUZREP = "buzrep";
-
-// NEW: Analog Trigger keys
-static const char* KEY_A_EN = "a_en";
-static const char* KEY_A_TYPE = "a_ty";      // 0=VOLT 1=CURR
-static const char* KEY_A_CH = "a_ch";        // 1..2
-static const char* KEY_A_OP = "a_op";        // 0=ABOVE 1=BELOW 2=EQUAL 3=IN_RANGE
-static const char* KEY_A_V1 = "a_v1";        // mV or mA
-static const char* KEY_A_V2 = "a_v2";        // mV or mA (for range)
-static const char* KEY_A_HYS = "a_hys";      // hysteresis (mV or mA)
-static const char* KEY_A_DBMS = "a_db";      // debounce ms
-static const char* KEY_A_TOL = "a_tol";      // tolerance for EQUAL (mV or mA)
 
 // ======================================================================
-// WIFI AP / CONFIG PORTAL
+// WIFI STA (Station) CONFIG (added for Web Network tab)
 // ======================================================================
-WebServer g_http(80);
-String g_apSsid = "A8RM-SETUP";
-String g_apPass = "cortexlink";
-bool   g_runConfigPortal = false;
+bool   g_staEnabled = false;
+bool   g_staDhcp = true;
+String g_staSsid = "";
+String g_staPass = "";
+String g_staIp = "";
+String g_staMask = "255.255.255.0";
+String g_staGw = "";
+String g_staDns = "8.8.8.8";
 
 // ======================================================================
 // ETHERNET TCP SERVER
@@ -246,22 +175,6 @@ struct BuzzPatternRuntime {
     uint32_t phaseStartMs = 0;
 } g_buzz;
 
-// ======================================================================
-// Device Info Preferences
-// ======================================================================
-static const char* PREF_NS_HWINFO = "hwinfo";
-static const char* KEY_BOARD_NAME = "board_name";
-static const char* KEY_BOARD_SERIAL = "board_sn";
-static const char* KEY_CREATED = "created";
-static const char* KEY_MANUFACTURER = "mfg";
-static const char* KEY_FW_VER = "fw";
-static const char* KEY_HW_VER = "hw";
-static const char* KEY_YEAR = "year";
-
-static const char* FW_VERSION_STR = "1.0.0";
-static const char* HW_VERSION_STR = "A8R-M-REV1";
-static const char* MANUFACTURER_STR = "Microcode Engineering";
-
 // ===== NEW: MAC info block =====
 static const uint16_t MB_REG_MACINFO_START = 290;     // 290..316 (27 regs)
 static const uint16_t MB_MACINFO_REGS = 27;
@@ -273,7 +186,7 @@ static uint16_t mb_macInfoRegs[MB_MACINFO_REGS] = { 0 };
 static String getEthMacFromPrefs() {
 
     g_prefs.begin(PREF_NS_NET, true);
-    String mac = g_prefs.getString(KEY_ETH_MAC, ETH_MAC);
+    String mac = g_prefs.getString(KEY_ETH_MAC, "00:00:00:00:00:00");
     g_prefs.end();
     return mac;
 }
@@ -420,10 +333,10 @@ void handleTcpClient();
 void handleTcpCommand(const String& line);
 void sendSnapshot(EthernetClient& c, bool oneLineJson);
 
-void handleHttpRoot();
-void handleHttpGetConfig();
-void handleHttpSetConfig();
-void handleHttpNotFound();
+//void handleHttpRoot();
+//void handleHttpGetConfig();
+//void handleHttpSetConfig();
+//void handleHttpNotFound();
 
 void processSerial();
 void execSerialCommand(const String& cmd);
@@ -455,6 +368,14 @@ static String schedNs(uint8_t idx);
 // NETCFG helpers
 static void netcfgReplyGet();
 static void netcfgApplySet(const String& args);
+
+// ===== HTTP API for Web dashboard settings (Network + RTC) =====
+static void registerNetRtcHttpApi();
+static bool parseIpString(const String& s, IPAddress& out);
+static String jsonEscapeMini(const String& s);
+static void wifiStaApplyFromPrefs(bool forceReconnect);
+
+
 static bool netcfgIsSafeToken(const String& v);
 static void netcfgScheduleReboot(uint32_t delayMs);
 static void netcfgSerialDump();
@@ -1089,9 +1010,9 @@ static void netcfgSerialDump() {
     const char* C_WARN = "\x1b[1;31m";
 
     g_prefs.begin(PREF_NS_NET, true);
-    bool apDone = g_prefs.getBool(KEY_AP_DONE, false);
+    bool apDone = g_prefs.getBool(KEY_AP_DONE, true);
     bool dhcp = g_prefs.getBool(KEY_ETH_DHCP, true);
-    String mac = g_prefs.getString(KEY_ETH_MAC, "A8:FD:B5:E1:D4:B3");
+    String mac = g_prefs.getString(KEY_ETH_MAC, ETH_MAC);
     String ipPref = g_prefs.getString(KEY_ETH_IP, "");
     String maskPref = g_prefs.getString(KEY_ETH_MASK, "255.255.255.0");
     String gwPref = g_prefs.getString(KEY_ETH_GW, "");
@@ -1207,20 +1128,26 @@ void setup() {
     g_lastDiBits = g_di.getInputState();
 
     startConfigStation_WiFi();
-    stopConfigPortal();
+
+    // Always-on SoftAP + HTTP server
+    startConfigPortal();
+    g_runConfigPortal = true;
+
     // WiFi portal decision
     g_prefs.begin(PREF_NS_NET, true);
-    bool apDone = g_prefs.getBool(KEY_AP_DONE, false);
+    bool apDone = g_prefs.getBool(KEY_AP_DONE, true);
     g_prefs.end();
 
-    if (!apDone) {
-        Serial.println(F("No AP_DONE flag found -> entering WiFi AP config mode."));
-        startConfigPortal();
-        g_runConfigPortal = true;
-    }
-    else {
-        Serial.println(F("AP config previously completed -> skipping portal."));
-    }
+    Serial.println(apDone ? F("AP_DONE=YES (portal still kept ON for dashboard)") : F("AP_DONE=NO (portal ON)"));
+
+    //if (!apDone) {
+    //    Serial.println(F("No AP_DONE flag found -> entering WiFi AP config mode."));
+    //    startConfigPortal();
+    //    g_runConfigPortal = true;
+    //}
+    //else {
+    //    Serial.println(F("AP config previously completed -> skipping portal."));
+    //}
 
     if (!startEthernet()) {
         Serial.println(F("[FATAL] Ethernet failed to start. Remaining in serial-only mode."));
@@ -1240,6 +1167,46 @@ void setup() {
     }
 
 
+    // ===== NEW: MQTT begin (WiFi over SoftAP) =====
+    {
+        MQTTConfig cfg;
+        cfg.broker = MQTT_BROKER_IP;
+        cfg.port = MQTT_BROKER_PORT;
+        cfg.baseTopic = "cl/a8rm";
+
+        // Optional: if your MQTT broker also requires auth for normal TCP(1883)
+        cfg.username = MQTT_WS_USER;
+        cfg.password = MQTT_WS_PASS;
+
+        g_mqtt.setConfig(cfg);
+        g_mqtt.beginWifi(&g_di, &g_relays, &g_dac, &g_ai, &g_dht, &g_rtc, 2000);
+
+        DashboardMqttInfo info;
+        info.baseTopic = cfg.baseTopic;
+        info.clientId = g_mqtt.getConfig().clientId;
+        info.fullBase = cfg.baseTopic + "/" + info.clientId;
+
+        info.brokerWsHost = MQTT_BROKER_IP;
+        info.brokerWsPort = MQTT_BROKER_WS_PORT;
+        info.brokerWsPath = "/";
+
+        // NEW: provide ws auth to browser
+        info.brokerWsUser = MQTT_WS_USER;
+        info.brokerWsPass = MQTT_WS_PASS;
+
+        bool dashOk = WebDashboard::begin(g_http, info);
+        Serial.println(dashOk ? "[WEB] Dashboard routes registered + LittleFS OK"
+            : "[WEB] Dashboard routes registered but LittleFS FAILED");
+
+        registerNetRtcHttpApi();
+        Serial.println("[WEB] NetCFG + RTC API routes registered");
+
+        g_http.begin();
+        Serial.println("[WEB] HTTP server started on port 80");
+        Serial.println("[MQTT] MQTT + Dashboard configured.");
+    }
+
+
     netcfgSerialDump();
 
     printHelp();
@@ -1256,6 +1223,14 @@ void loop() {
     g_eth.update();
 
     if (g_runConfigPortal) g_http.handleClient();
+
+    // Maintain STA connection (non-blocking)
+    static uint32_t lastStaKick = 0;
+    if (g_staEnabled && (millis() - lastStaKick) > 10000) {
+        lastStaKick = millis();
+        if (WiFi.status() != WL_CONNECTED) wifiStaApplyFromPrefs(false);
+    }
+
     if (g_eth.isReady()) handleTcpClient();
 
     schedUpdate();
@@ -1288,6 +1263,8 @@ void loop() {
         lastLeaseSave = millis();
         netcfgPersistRuntimeLease();
     }
+
+    g_mqtt.loop();
 }
 
 
@@ -1671,11 +1648,28 @@ void loadNetworkConfig() {
 
     String apS = g_prefs.getString(KEY_AP_SSID, "A8RM-SETUP");
     String apP = g_prefs.getString(KEY_AP_PASS, "cortexlink");
+    // WiFi STA (station) settings
+    bool staEn = g_prefs.getBool(KEY_STA_ENABLED, false);
+    bool staDh = g_prefs.getBool(KEY_STA_DHCP, true);
+    String staS = g_prefs.getString(KEY_STA_SSID, "");
+    String staP = g_prefs.getString(KEY_STA_PASS, "");
+    String staIp = g_prefs.getString(KEY_STA_IP, "");
+    String staMask = g_prefs.getString(KEY_STA_MASK, "255.255.255.0");
+    String staGw = g_prefs.getString(KEY_STA_GW, "");
+    String staDns = g_prefs.getString(KEY_STA_DNS, "8.8.8.8");
     g_prefs.end();
-
     g_tcpPort = port;
     g_apSsid = apS;
     g_apPass = apP;
+
+    g_staEnabled = staEn;
+    g_staDhcp = staDh;
+    g_staSsid = staS;
+    g_staPass = staP;
+    g_staIp = staIp;
+    g_staMask = staMask;
+    g_staGw = staGw;
+    g_staDns = staDns;
 
     Serial.println(F("Loaded network config:"));
     Serial.print(F("  AP_DONE: ")); Serial.println(apDone ? "YES" : "NO");
@@ -1706,7 +1700,7 @@ void startConfigPortal() {
         return;
     }
 
-    WiFi.mode(WIFI_AP);
+    WiFi.mode(g_staEnabled ? WIFI_AP_STA : WIFI_AP);
 
     /* Set AP MAC address */
     esp_err_t err = esp_wifi_set_mac(WIFI_IF_AP, mac);
@@ -1722,17 +1716,30 @@ void startConfigPortal() {
 
     Serial.println("AP MAC stored in flash");
 
+    // If STA is enabled, set STA MAC too (we are in WIFI_AP_STA mode)
+    if (g_staEnabled) {
+        uint8_t smac[6];
+        if (parseMacString(STA_MAC, smac)) {
+            esp_err_t e2 = esp_wifi_set_mac(WIFI_IF_STA, smac);
+            if (e2 == ESP_OK) Serial.println("STA MAC address set successfully");
+            else Serial.printf("Failed to set STA MAC, error: %d\n", (int)e2);
+        }
+    }
+
     WiFi.softAP(g_apSsid.c_str(), g_apPass.c_str());
+
+    // Apply STA connection (if enabled) while keeping AP running
+    wifiStaApplyFromPrefs(false);
     IPAddress apIp = WiFi.softAPIP();
     Serial.print(F("AP SSID: ")); Serial.println(g_apSsid);
     Serial.print(F("AP PASS: ")); Serial.println(g_apPass);
     Serial.print(F("AP IP  : ")); Serial.println(apIp);
 
-    g_http.on("/", handleHttpRoot);
-    g_http.on("/api/get", handleHttpGetConfig);
-    g_http.on("/api/set", HTTP_POST, handleHttpSetConfig);
-    g_http.onNotFound(handleHttpNotFound);
-    g_http.begin();
+    //g_http.on("/", handleHttpRoot);
+    //g_http.on("/api/get", handleHttpGetConfig);
+    //g_http.on("/api/set", HTTP_POST, handleHttpSetConfig);
+    //g_http.onNotFound(handleHttpNotFound);
+    //g_http.begin();
 }
 
 void startConfigStation_WiFi() {
@@ -1787,19 +1794,285 @@ void stopConfigPortal() {
     g_runConfigPortal = false;
     Serial.println(F("Config portal stopped, WiFi disabled."));
 }
-void handleHttpRoot() { g_http.send(200, "text/plain", "Portal UI not included in this build."); }
-void handleHttpGetConfig() { g_http.send(200, "application/json", "{}"); }
-void handleHttpSetConfig() { g_http.send(200, "text/plain", "OK"); }
-void handleHttpNotFound() { g_http.send(404, "text/plain", "Not found"); }
+
+
+// ======================================================================
+// HTTP helpers + WiFi STA apply
+// ======================================================================
+static String jsonEscapeMini(const String& s) {
+    String out;
+    out.reserve(s.length() + 8);
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        switch (c) {
+        case '\\': out += "\\\\"; break;
+        case '"':  out += "\\\""; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:   out += c; break;
+        }
+    }
+    return out;
+}
+
+static bool parseIpString(const String& s, IPAddress& out) {
+    out = IPAddress(0, 0, 0, 0);
+    if (s.length() == 0) return false;
+    int a, b, c, d;
+    if (sscanf(s.c_str(), "%d.%d.%d.%d", &a, &b, &c, &d) != 4) return false;
+    if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) return false;
+    out = IPAddress((uint8_t)a, (uint8_t)b, (uint8_t)c, (uint8_t)d);
+    return true;
+}
+
+static void wifiStaApplyFromPrefs(bool forceReconnect) {
+    static uint32_t lastAttemptMs = 0;
+
+    if (!g_staEnabled) {
+        // If STA disabled, keep AP running if it is active
+        if (WiFi.getMode() == WIFI_AP_STA) WiFi.mode(WIFI_AP);
+        return;
+    }
+
+    const uint32_t now = millis();
+    if (!forceReconnect && (now - lastAttemptMs) < 1500) return;
+
+    if (!forceReconnect && WiFi.status() == WL_CONNECTED) return;
+
+    lastAttemptMs = now;
+
+    if (g_staSsid.length() == 0) return;
+
+    // Ensure AP+STA mode so dashboard AP stays alive
+    if (WiFi.getMode() != WIFI_AP_STA) {
+        WiFi.mode(WIFI_AP_STA);
+    }
+
+    if (!g_staDhcp) {
+        IPAddress ip, mask, gw, dns;
+        if (parseIpString(g_staIp, ip) && parseIpString(g_staMask, mask) && parseIpString(g_staGw, gw)) {
+            if (!parseIpString(g_staDns, dns)) dns = IPAddress(8, 8, 8, 8);
+            WiFi.config(ip, gw, mask, dns);
+        }
+    }
+
+    WiFi.disconnect(false, true);
+    delay(50);
+    WiFi.begin(g_staSsid.c_str(), g_staPass.c_str());
+}
+
+static void registerNetRtcHttpApi() {
+    // Network config: GET
+    g_http.on("/api/netcfg/get", HTTP_GET, []() {
+        g_http.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        g_http.sendHeader("Pragma", "no-cache");
+        g_http.sendHeader("Expires", "0");
+
+        g_prefs.begin(PREF_NS_NET, true);
+        bool ethDhcp = g_prefs.getBool(KEY_ETH_DHCP, true);
+        String ethMac = g_prefs.getString(KEY_ETH_MAC, ETH_MAC);
+        String ethIp = g_prefs.getString(KEY_ETH_IP, "");
+        String ethMask = g_prefs.getString(KEY_ETH_MASK, "255.255.255.0");
+        String ethGw = g_prefs.getString(KEY_ETH_GW, "");
+        String ethDns = g_prefs.getString(KEY_ETH_DNS, "8.8.8.8");
+        uint16_t tcpPort = g_prefs.getUShort(KEY_TCP_PORT, g_tcpPort);
+
+        String apS = g_prefs.getString(KEY_AP_SSID, g_apSsid);
+        String apP = g_prefs.getString(KEY_AP_PASS, g_apPass);
+
+        bool staEn = g_prefs.getBool(KEY_STA_ENABLED, false);
+        bool staDh = g_prefs.getBool(KEY_STA_DHCP, true);
+        String staS = g_prefs.getString(KEY_STA_SSID, "");
+        String staP = g_prefs.getString(KEY_STA_PASS, "");
+        String staIp = g_prefs.getString(KEY_STA_IP, "");
+        String staMask = g_prefs.getString(KEY_STA_MASK, "255.255.255.0");
+        String staGw = g_prefs.getString(KEY_STA_GW, "");
+        String staDns = g_prefs.getString(KEY_STA_DNS, "8.8.8.8");
+        g_prefs.end();
+
+        // Runtime
+        IPAddress apIpNow = WiFi.softAPIP();
+        bool staConn = (WiFi.status() == WL_CONNECTED);
+        IPAddress staNow = staConn ? WiFi.localIP() : IPAddress(0, 0, 0, 0);
+
+        IPAddress ethNow = g_eth.isReady() ? g_eth.getIP() : IPAddress(0, 0, 0, 0);
+        String json = "{";
+        json += "\"ap\":{\"ssid\":\"" + jsonEscapeMini(apS) + "\",\"pass\":\"" + jsonEscapeMini(apP) + "\",\"ip\":\"" + ipToString(apIpNow) + "\"},";
+
+        json += "\"sta\":{\"enabled\":" + String(staEn ? 1 : 0) + ",\"ssid\":\"" + jsonEscapeMini(staS) + "\",\"pass\":\"" + jsonEscapeMini(staP) + "\",";
+        json += "\"dhcp\":" + String(staDh ? 1 : 0) + ",\"ip\":\"" + jsonEscapeMini(staIp) + "\",\"mask\":\"" + jsonEscapeMini(staMask) + "\",\"gw\":\"" + jsonEscapeMini(staGw) + "\",\"dns\":\"" + jsonEscapeMini(staDns) + "\",";
+        json += "\"connected\":" + String(staConn ? 1 : 0) + ",\"ip_now\":\"" + ipToString(staNow) + "\"},";
+
+        json += "\"eth\":{\"dhcp\":" + String(ethDhcp ? 1 : 0) + ",\"mac\":\"" + jsonEscapeMini(ethMac) + "\",\"ip\":\"" + jsonEscapeMini(ethIp) + "\",\"mask\":\"" + jsonEscapeMini(ethMask) + "\",\"gw\":\"" + jsonEscapeMini(ethGw) + "\",\"dns\":\"" + jsonEscapeMini(ethDns) + "\",\"ip_now\":\"" + ipToString(ethNow) + "\"},";
+
+        json += "\"tcp\":{\"port\":" + String(tcpPort) + "}";
+        json += "}";
+
+        g_http.send(200, "application/json; charset=utf-8", json);
+        });
+
+    // Network config: SET
+    g_http.on("/api/netcfg/set", HTTP_POST, []() {
+        g_http.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+
+        String ap_ssid = g_http.arg("ap_ssid");
+        String ap_pass = g_http.arg("ap_pass");
+
+        bool sta_en = (g_http.arg("sta_en").toInt() != 0);
+        String sta_ssid = g_http.arg("sta_ssid");
+        String sta_pass = g_http.arg("sta_pass");
+        bool sta_dhcp = (g_http.arg("sta_dhcp").toInt() != 0);
+        String sta_ip = g_http.arg("sta_ip");
+        String sta_mask = g_http.arg("sta_mask");
+        String sta_gw = g_http.arg("sta_gw");
+        String sta_dns = g_http.arg("sta_dns");
+
+        bool eth_dhcp = (g_http.arg("eth_dhcp").toInt() != 0);
+        String eth_mac = g_http.arg("eth_mac");
+        String eth_ip = g_http.arg("eth_ip");
+        String eth_mask = g_http.arg("eth_mask");
+        String eth_gw = g_http.arg("eth_gw");
+        String eth_dns = g_http.arg("eth_dns");
+
+        long p = g_http.arg("tcp_port").toInt();
+        if (p < 1) p = 1;
+        if (p > 65535) p = 65535;
+        uint16_t tcp_port = (uint16_t)p;
+
+        bool doApply = (g_http.arg("apply").toInt() != 0);
+        bool doReboot = (g_http.arg("reboot").toInt() != 0);
+
+        // Basic token safety (no quotes, no newlines)
+        auto safe = [](const String& v)->bool {
+            for (size_t i = 0; i < v.length(); i++) {
+                char c = v[i];
+                if (c == '\r' || c == '\n' || c == '"') return false;
+            }
+            return true;
+        };
+        if (!safe(ap_ssid) || !safe(ap_pass) || !safe(sta_ssid) || !safe(sta_pass) || !safe(sta_ip) || !safe(sta_mask) || !safe(sta_gw) || !safe(sta_dns) || !safe(eth_mac) || !safe(eth_ip) || !safe(eth_mask) || !safe(eth_gw) || !safe(eth_dns)) {
+            g_http.send(400, "application/json; charset=utf-8", "{\"ok\":0,\"err\":\"bad_tokens\"}");
+            return;
+        }
+
+        if (ap_ssid.length() == 0) ap_ssid = g_apSsid;
+        if (ap_pass.length() == 0) ap_pass = g_apPass;
+
+        g_prefs.begin(PREF_NS_NET, false);
+        g_prefs.putString(KEY_AP_SSID, ap_ssid);
+        g_prefs.putString(KEY_AP_PASS, ap_pass);
+
+        g_prefs.putBool(KEY_STA_ENABLED, sta_en);
+        g_prefs.putBool(KEY_STA_DHCP, sta_dhcp);
+        g_prefs.putString(KEY_STA_SSID, sta_ssid);
+        g_prefs.putString(KEY_STA_PASS, sta_pass);
+        g_prefs.putString(KEY_STA_IP, sta_ip);
+        g_prefs.putString(KEY_STA_MASK, sta_mask);
+        g_prefs.putString(KEY_STA_GW, sta_gw);
+        g_prefs.putString(KEY_STA_DNS, sta_dns);
+
+        g_prefs.putBool(KEY_ETH_DHCP, eth_dhcp);
+        if (eth_mac.length()) g_prefs.putString(KEY_ETH_MAC, eth_mac);
+        g_prefs.putString(KEY_ETH_IP, eth_ip);
+        g_prefs.putString(KEY_ETH_MASK, eth_mask);
+        g_prefs.putString(KEY_ETH_GW, eth_gw);
+        g_prefs.putString(KEY_ETH_DNS, eth_dns);
+
+        g_prefs.putUShort(KEY_TCP_PORT, tcp_port);
+        g_prefs.end();
+
+        // Update runtime globals (WiFi + TCP). Ethernet apply is best via reboot.
+        g_apSsid = ap_ssid;
+        g_apPass = ap_pass;
+        g_tcpPort = tcp_port;
+
+        g_staEnabled = sta_en;
+        g_staDhcp = sta_dhcp;
+        g_staSsid = sta_ssid;
+        g_staPass = sta_pass;
+        g_staIp = sta_ip;
+        g_staMask = sta_mask;
+        g_staGw = sta_gw;
+        g_staDns = sta_dns;
+
+        if (doApply) {
+            // Restart TCP server (Ethernet side)
+            startTcpServer();
+
+            // Restart AP with new SSID/pass
+            WiFi.softAPdisconnect(false);
+            delay(50);
+            if (WiFi.getMode() != WIFI_AP_STA && g_staEnabled) WiFi.mode(WIFI_AP_STA);
+            WiFi.softAP(g_apSsid.c_str(), g_apPass.c_str());
+            wifiStaApplyFromPrefs(true);
+        }
+
+        g_http.send(200, "application/json; charset=utf-8", "{\"ok\":1}");
+
+        if (doReboot) {
+            netcfgScheduleReboot(600);
+        }
+        });
+
+    // RTC: GET
+    g_http.on("/api/rtc/get", HTTP_GET, []() {
+        g_http.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        DateTime now = g_rtc.getDateTime(false);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
+        String json = "{";
+        json += "\"rtc\":\"" + String(buf) + "\",";
+        json += "\"unix\":" + String((uint32_t)now.unixtime());
+        json += "}";
+        g_http.send(200, "application/json; charset=utf-8", json);
+        });
+
+    // RTC: SET (accept unix seconds || an ISO-like string)
+    g_http.on("/api/rtc/set", HTTP_POST, []() {
+        String ts = g_http.arg("ts");
+        ts.trim();
+        bool ok = false;
+        if (ts.length() > 0) {
+            bool allDigits = true;
+            for (size_t i = 0; i < ts.length(); i++) {
+                if (ts[i] < '0' || ts[i] > '9') { allDigits = false; break; }
+            }
+            if (allDigits) {
+                uint32_t u = (uint32_t)ts.toInt();
+                g_rtc.setDateTime(DateTime(u));
+                ok = true;
+            }
+            else {
+                ok = g_rtc.setDateTimeFromString(ts.c_str());
+            }
+        }
+        g_http.send(200, "application/json; charset=utf-8", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+        });
+}
+
+//void handleHttpRoot() { g_http.send(200, "text/plain", "Portal UI not included in this build."); }
+//void handleHttpGetConfig() { g_http.send(200, "application/json", "{}"); }
+//void handleHttpSetConfig() { g_http.send(200, "text/plain", "OK"); }
+//void handleHttpNotFound() { g_http.send(404, "text/plain", "Not found"); }
 
 // ======================================================================
 // ETHERNET BRING-UP
 // ======================================================================
 bool startEthernet() {
+
+
     Serial.println(F("\n=== Starting W5500 Ethernet ==="));
+
+
+    g_prefs.begin(PREF_NS_NET, false);
+    g_prefs.putString(KEY_ETH_MAC, ETH_MAC);
+    g_prefs.end();
+
+
     g_prefs.begin(PREF_NS_NET, true);
     bool dhcp = g_prefs.getBool(KEY_ETH_DHCP, true);
-    String macS = g_prefs.getString(KEY_ETH_MAC, "A8:FD:B5:E1:D4:B3");
+    String macS = g_prefs.getString(KEY_ETH_MAC, ETH_MAC);
     String ipS = g_prefs.getString(KEY_ETH_IP, "");
     String maskS = g_prefs.getString(KEY_ETH_MASK, "255.255.255.0");
     String gwS = g_prefs.getString(KEY_ETH_GW, "");
@@ -1931,6 +2204,14 @@ static void netcfgApplySet(const String& args) {
     String apS = g_prefs.getString(KEY_AP_SSID, g_apSsid);
     String apP = g_prefs.getString(KEY_AP_PASS, g_apPass);
     uint8_t aiVr = (uint8_t)g_prefs.getUChar(KEY_AI_VRANGE, 5);
+    bool staEn = g_prefs.getBool(KEY_STA_ENABLED, false);
+    bool staDh = g_prefs.getBool(KEY_STA_DHCP, true);
+    String staS = g_prefs.getString(KEY_STA_SSID, "");
+    String staP = g_prefs.getString(KEY_STA_PASS, "");
+    String staIp = g_prefs.getString(KEY_STA_IP, "");
+    String staMask = g_prefs.getString(KEY_STA_MASK, "255.255.255.0");
+    String staGw = g_prefs.getString(KEY_STA_GW, "");
+    String staDns = g_prefs.getString(KEY_STA_DNS, "8.8.8.8");
     g_prefs.end();
 
     String sDhcp = getTokValue(args, "DHCP");
@@ -1944,6 +2225,16 @@ static void netcfgApplySet(const String& args) {
     String sApPass = getTokValue(args, "APPASS");
     String sReboot = getTokValue(args, "REBOOT");
     String sAiVr = getTokValue(args, "AI_VRANGE");
+
+    // WiFi STA config tokens (optional)
+    String sStaEn = getTokValue(args, "STA_EN");
+    String sStaDh = getTokValue(args, "STA_DHCP");
+    String sStaSsid = getTokValue(args, "STA_SSID");
+    String sStaPass = getTokValue(args, "STA_PASS");
+    String sStaIp = getTokValue(args, "STA_IP");
+    String sStaMask = getTokValue(args, "STA_MASK");
+    String sStaGw = getTokValue(args, "STA_GW");
+    String sStaDns = getTokValue(args, "STA_DNS");
 
     if (sDhcp.length()) dhcp = (sDhcp.toInt() != 0);
     if (sMac.length()) mac = sMac;
@@ -1964,8 +2255,20 @@ static void netcfgApplySet(const String& args) {
         aiVr = (uint8_t)((vr == 10) ? 10 : 5);
     }
 
+    // Apply STA overrides
+    if (sStaEn.length())  staEn = (sStaEn.toInt() != 0);
+    if (sStaDh.length())  staDh = (sStaDh.toInt() != 0);
+    if (sStaSsid.length()) staS = sStaSsid;
+    if (sStaPass.length()) staP = sStaPass;
+    if (sStaIp.length())   staIp = sStaIp;
+    if (sStaMask.length()) staMask = sStaMask;
+    if (sStaGw.length())   staGw = sStaGw;
+    if (sStaDns.length())  staDns = sStaDns;
+
     if (!netcfgIsSafeToken(mac) || !netcfgIsSafeToken(ip) || !netcfgIsSafeToken(mask) ||
-        !netcfgIsSafeToken(gw) || !netcfgIsSafeToken(dns) || !netcfgIsSafeToken(apS) || !netcfgIsSafeToken(apP)) {
+        !netcfgIsSafeToken(gw) || !netcfgIsSafeToken(dns) || !netcfgIsSafeToken(apS) || !netcfgIsSafeToken(apP) ||
+        !netcfgIsSafeToken(staS) || !netcfgIsSafeToken(staP) || !netcfgIsSafeToken(staIp) || !netcfgIsSafeToken(staMask) ||
+        !netcfgIsSafeToken(staGw) || !netcfgIsSafeToken(staDns)) {
         tcpSend("NETCFG ERR TOKENS");
         return;
     }
@@ -1981,11 +2284,28 @@ static void netcfgApplySet(const String& args) {
     g_prefs.putString(KEY_AP_SSID, apS);
     g_prefs.putString(KEY_AP_PASS, apP);
     g_prefs.putUChar(KEY_AI_VRANGE, aiVr);
+    g_prefs.putBool(KEY_STA_ENABLED, staEn);
+    g_prefs.putBool(KEY_STA_DHCP, staDh);
+    g_prefs.putString(KEY_STA_SSID, staS);
+    g_prefs.putString(KEY_STA_PASS, staP);
+    g_prefs.putString(KEY_STA_IP, staIp);
+    g_prefs.putString(KEY_STA_MASK, staMask);
+    g_prefs.putString(KEY_STA_GW, staGw);
+    g_prefs.putString(KEY_STA_DNS, staDns);
     g_prefs.end();
 
     g_tcpPort = port;
     g_apSsid = apS;
     g_apPass = apP;
+
+    g_staEnabled = staEn;
+    g_staDhcp = staDh;
+    g_staSsid = staS;
+    g_staPass = staP;
+    g_staIp = staIp;
+    g_staMask = staMask;
+    g_staGw = staGw;
+    g_staDns = staDns;
     saveAnalogConfig(aiVr);
 
     tcpSend("NETCFG OK");

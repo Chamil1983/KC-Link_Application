@@ -1,0 +1,10 @@
+/* Minimal icon helper for offline mode (no CDN). */
+.ico{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:1.2em;
+  height:1.2em;
+  font-weight:800;
+  opacity:.95;
+}

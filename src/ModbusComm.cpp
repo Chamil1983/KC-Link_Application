@@ -3,36 +3,73 @@
 
 ModbusComm::ModbusComm()
     : baudRate(9600),
+    dataBits(8),
+    parity(0),
+    stopBits(1),
     mbServerEnabled(false),
     slaveId(1),
     mode(MODE_IDLE) {
     serialPort = &Serial2;
 }
 
-bool ModbusComm::begin(unsigned long baud) {
-    baudRate = baud;
+static uint32_t serialConfigFrom(uint8_t dataBits, uint8_t parity, uint8_t stopBits) {
+    // ESP32 Arduino supports SERIAL_8N1, SERIAL_8E1, SERIAL_8O1, etc.
+    // We'll support 7/8 data bits, N/E/O parity, 1/2 stop bits.
 
-    // Configure MAX485 control pin (DE/RE tied) - LOW = receive
+    if (dataBits != 7 && dataBits != 8) dataBits = 8;
+    if (parity > 2) parity = 0;
+    if (stopBits != 2) stopBits = 1;
+
+    // Map to Arduino macros
+    if (dataBits == 8) {
+        if (stopBits == 1) {
+            if (parity == 0) return SERIAL_8N1;
+            if (parity == 1) return SERIAL_8O1;
+            return SERIAL_8E1;
+        }
+        else {
+            if (parity == 0) return SERIAL_8N2;
+            if (parity == 1) return SERIAL_8O2;
+            return SERIAL_8E2;
+        }
+    }
+    else {
+        if (stopBits == 1) {
+            if (parity == 0) return SERIAL_7N1;
+            if (parity == 1) return SERIAL_7O1;
+            return SERIAL_7E1;
+        }
+        else {
+            if (parity == 0) return SERIAL_7N2;
+            if (parity == 1) return SERIAL_7O2;
+            return SERIAL_7E2;
+        }
+    }
+}
+
+bool ModbusComm::begin(unsigned long baud, uint8_t db, uint8_t par, uint8_t sb) {
+    baudRate = baud;
+    dataBits = db;
+    parity = par;
+    stopBits = sb;
+
     pinMode(PIN_MAX485_TXRX, OUTPUT);
     digitalWrite(PIN_MAX485_TXRX, LOW);
 
-    // Configure UART2 for RS485
-    serialPort->begin(baudRate, SERIAL_8N1, PIN_MAX485_RO, PIN_MAX485_DI);
+    uint32_t cfg = serialConfigFrom(dataBits, parity, stopBits);
+
+    serialPort->begin(baudRate, cfg, PIN_MAX485_RO, PIN_MAX485_DI);
     delay(100);
 
-    // Wrap Serial2 with sniffer stream to log raw frames
     if (sniff) { delete sniff; sniff = nullptr; }
     sniff = new ModbusSniffStream(serialPort);
-    // Optional: tweak frame gap if you use much higher baudrates
-    // sniff->setFrameGapMs(5);
 
-    // Initialize Modbus stack with RS485 driver enable pin using sniffer
     mb.begin(sniff, PIN_MAX485_TXRX);
 
     mbServerEnabled = false;
     mode = MODE_IDLE;
 
-    INFO_LOG("ModbusComm::begin baud=%lu", baudRate);
+    INFO_LOG("ModbusComm::begin baud=%lu db=%u par=%u sb=%u", baudRate, dataBits, parity, stopBits);
     return true;
 }
 
@@ -119,12 +156,10 @@ bool ModbusComm::writeMultipleRegisters(uint8_t sAddr, uint16_t regAddr, uint16_
 }
 
 void ModbusComm::task() {
-    // Keep Modbus stack responsive
     mb.task();
     if (sniff) sniff->serviceFlush();
 }
 
-// Register a contiguous block of holding registers with a single callback
 bool ModbusComm::addHoldingRegisterHandler(uint16_t regAddr, uint16_t numRegs, cbModbus cb) {
     ensureServer();
 
@@ -138,7 +173,6 @@ bool ModbusComm::addHoldingRegisterHandler(uint16_t regAddr, uint16_t numRegs, c
     return true;
 }
 
-// Register a contiguous block of holding registers with separate get/set callbacks
 bool ModbusComm::addHoldingRegisterHandlers(uint16_t regAddr, uint16_t numRegs, cbModbus cbGet, cbModbus cbSet) {
     ensureServer();
 
@@ -152,7 +186,6 @@ bool ModbusComm::addHoldingRegisterHandlers(uint16_t regAddr, uint16_t numRegs, 
     return true;
 }
 
-// Register a contiguous block of input registers
 bool ModbusComm::addInputRegisterHandler(uint16_t regAddr, uint16_t numRegs, cbModbus cb) {
     ensureServer();
 
@@ -165,7 +198,6 @@ bool ModbusComm::addInputRegisterHandler(uint16_t regAddr, uint16_t numRegs, cbM
     return true;
 }
 
-// Register coils per-address (legacy: same cb for get and set)
 bool ModbusComm::addCoilHandler(uint16_t regAddr, uint16_t numCoils, cbModbus cb) {
     ensureServer();
 
@@ -184,7 +216,6 @@ bool ModbusComm::addCoilHandler(uint16_t regAddr, uint16_t numCoils, cbModbus cb
     return ok;
 }
 
-// Register coils per-address with separate GET/SET callbacks
 bool ModbusComm::addCoilHandlers(uint16_t regAddr, uint16_t numCoils, cbModbus cbGet, cbModbus cbSet) {
     ensureServer();
 
@@ -203,7 +234,6 @@ bool ModbusComm::addCoilHandlers(uint16_t regAddr, uint16_t numCoils, cbModbus c
     return ok;
 }
 
-// Register a contiguous block of discrete inputs (input status)
 bool ModbusComm::addDiscreteInputHandler(uint16_t regAddr, uint16_t numInputs, cbModbus cb) {
     ensureServer();
 
@@ -245,13 +275,11 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
     uint8_t slave = buf[0];
     uint8_t fc = buf[1];
 
-    // CRC (last two bytes if present)
     uint16_t crc = 0;
     if (len >= 4) {
         crc = (uint16_t)buf[len - 2] | ((uint16_t)buf[len - 1] << 8);
     }
 
-    // Helpers for rendering ON/OFF classification
     auto onoff_fc05 = [](uint16_t v) -> const char* {
         if (v == 0xFF00) return "ON";
         if (v == 0x0000) return "OFF";
@@ -264,7 +292,7 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
     };
 
     switch (fc) {
-    case 0x05: { // Write Single Coil
+    case 0x05: {
         if (len >= 8) {
             uint16_t addr = rd16(&buf[2]);
             uint16_t val = rd16(&buf[4]);
@@ -273,7 +301,7 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
         }
         break;
     }
-    case 0x06: { // Write Single Register
+    case 0x06: {
         if (len >= 8) {
             uint16_t addr = rd16(&buf[2]);
             uint16_t val = rd16(&buf[4]);
@@ -282,12 +310,11 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
         }
         break;
     }
-    case 0x0F: { // Write Multiple Coils
+    case 0x0F: {
         if (len >= 9) {
             uint16_t addr = rd16(&buf[2]);
             uint16_t qty = rd16(&buf[4]);
             uint8_t  bc = buf[6];
-            // Print first up to 4 data bytes for brevity
             String dataBytes;
             for (uint8_t i = 0; i < bc && i < 4; i++) {
                 char tmp[6];
@@ -299,12 +326,11 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
         }
         break;
     }
-    case 0x10: { // Write Multiple Registers
+    case 0x10: {
         if (len >= 9) {
             uint16_t addr = rd16(&buf[2]);
             uint16_t qty = rd16(&buf[4]);
             uint8_t  bc = buf[6];
-            // Print first up to 4 bytes (2 registers) as hex
             String dataBytes;
             for (uint8_t i = 0; i < bc && i < 4; i++) {
                 char tmp[6];
@@ -316,10 +342,10 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
         }
         break;
     }
-    case 0x01: // Read Coils
-    case 0x02: // Read Discrete Inputs
-    case 0x03: // Read Holding Registers
-    case 0x04: { // Read Input Registers
+    case 0x01:
+    case 0x02:
+    case 0x03:
+    case 0x04: {
         if (len >= 8) {
             uint16_t addr = rd16(&buf[2]);
             uint16_t qty = rd16(&buf[4]);
@@ -329,7 +355,6 @@ void ModbusSniffStream::printFriendly(const char* dir, const uint8_t* buf, size_
         break;
     }
     default:
-        // Already covered by generic parse; leave as-is
         break;
     }
 }
@@ -340,32 +365,32 @@ void ModbusSniffStream::parseSummary(const char* tag, const uint8_t* buf, size_t
     uint8_t fc = buf[1];
 
     switch (fc) {
-    case 0x05: // Write Single Coil
+    case 0x05:
         if (len >= 6) {
             uint16_t addr = (uint16_t)buf[2] << 8 | buf[3];
             uint16_t val = (uint16_t)buf[4] << 8 | buf[5];
             INFO_LOG("%s PARSE] Slave=%u FC=05 CoilAddr=0x%04X Value=0x%04X", tag, slave, addr, val);
         }
         break;
-    case 0x06: // Write Single Holding Reg
+    case 0x06:
         if (len >= 6) {
             uint16_t addr = (uint16_t)buf[2] << 8 | buf[3];
             uint16_t val = (uint16_t)buf[4] << 8 | buf[5];
             INFO_LOG("%s PARSE] Slave=%u FC=06 HReg=0x%04X Value=0x%04X", tag, slave, addr, val);
         }
         break;
-    case 0x03: // Read Holding
-    case 0x04: // Read Input
-    case 0x01: // Read Coils
-    case 0x02: // Read Discrete
+    case 0x03:
+    case 0x04:
+    case 0x01:
+    case 0x02:
         if (len >= 6) {
             uint16_t addr = (uint16_t)buf[2] << 8 | buf[3];
             uint16_t qty = (uint16_t)buf[4] << 8 | buf[5];
             INFO_LOG("%s PARSE] Slave=%u FC=0x%02X Addr=0x%04X Qty=0x%04X", tag, slave, fc, addr, qty);
         }
         break;
-    case 0x0F: // Write Multiple Coils
-    case 0x10: // Write Multiple Holding Regs
+    case 0x0F:
+    case 0x10:
         if (len >= 7) {
             uint16_t addr = (uint16_t)buf[2] << 8 | buf[3];
             uint16_t qty = (uint16_t)buf[4] << 8 | buf[5];
@@ -379,7 +404,6 @@ void ModbusSniffStream::parseSummary(const char* tag, const uint8_t* buf, size_t
         break;
     }
 
-    // NEW: Friendly one-line command logger
     const bool isRx = strstr(tag, "RX") != nullptr;
     printFriendly(isRx ? "RX" : "TX", buf, len);
 }

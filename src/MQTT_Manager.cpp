@@ -1,5 +1,33 @@
 #include "MQTT_Manager.h"
 
+#ifdef ESP32
+#include <Preferences.h>
+#include <WiFi.h>
+#include <ESP.h>
+#endif
+
+#ifdef ESP32
+static void mqtt_read_hwinfo(String& board, String& sn, String& mfg, String& fw, String& hw, String& year) {
+    Preferences p;
+    if (!p.begin("hwinfo", true)) return;
+    board = p.getString("board_name", "KC-Link A8R-M");
+    sn    = p.getString("board_sn", "");
+    mfg   = p.getString("mfg", "Microcode Engineering");
+    fw    = p.getString("fw", "1.0.0");
+    hw    = p.getString("hw", "A8R-M-REV1");
+    year  = p.getString("year", "2025");
+    p.end();
+}
+static String mqtt_mac_best(const String& ethMac, const String& staMac, const String& apMac) {
+    if (ethMac.length() >= 11) return ethMac;
+    if (staMac.length() >= 11) return staMac;
+    if (apMac.length() >= 11) return apMac;
+    return String("");
+}
+#endif
+
+
+
 MQTTManager* __attribute__((weak)) __mqtt_manager_singleton = nullptr;
 
 MQTTManager::MQTTManager()
@@ -217,7 +245,11 @@ String MQTTManager::topic(const String& leaf) {
 
 bool MQTTManager::ensureConnected() {
     if (_mode == NET_WIFI) {
-        if (WiFi.status() != WL_CONNECTED) return false;
+        // AP-only mode: WiFi.status() may NOT be WL_CONNECTED, but TCP works on SoftAP interface.
+        // Accept either STA connected OR SoftAP running.
+        bool staOk = (WiFi.status() == WL_CONNECTED);
+        bool apOk = (WiFi.getMode() & WIFI_AP) && (WiFi.softAPIP()[0] != 0);
+        if (!staOk && !apOk) return false;
     }
     else {
         if (!_eth || !_eth->isReady()) return false;
@@ -286,11 +318,16 @@ void MQTTManager::subscribeCommandTopics() {
     subscribe(topic("cmd/dac/+/mv"));
     subscribe(topic("cmd/dac/+/raw_set"));
     subscribe(topic("cmd/request/full"));
+    subscribe(topic("cmd/rtc/set"));
+    subscribe(topic("cmd/buzzer/beep"));
+    subscribe(topic("cmd/buzzer/pattern"));
+    subscribe(topic("cmd/buzzer/stop"));
 }
 
 void MQTTManager::publishSnapshot(bool forceAll) {
     publishSys(forceAll);
-    publishDI(forceAll);
+        publishDeviceInfo(forceAll);
+publishDI(forceAll);
     publishRelays(forceAll);
     publishRelayStates(forceAll);
     publishDAC(forceAll);
@@ -449,6 +486,75 @@ void MQTTManager::publishRTC(bool) {
     }
 }
 
+
+void MQTTManager::publishDeviceInfo(bool force) {
+#ifdef ESP32
+    if (!_mqtt.connected()) return;
+
+    String board, sn, mfg, fw, hw, year;
+    mqtt_read_hwinfo(board, sn, mfg, fw, hw, year);
+
+    _prefs.begin(PREF_NS, true);
+    String ethMac = _prefs.getString(KEY_ETH_MAC, "A8:FD:B5:E1:D4:B3");
+    _prefs.end();
+
+    _prefs.begin("wifi_cfg", true);
+    String apMac = _prefs.getString("ap_mac", "00:00:00:00:00:00");
+    _prefs.end();
+
+    _prefs.begin("wifi_cfg", true);
+    String staMac = _prefs.getString("sta_mac", "00:00:00:00:00:00");
+    _prefs.end();
+
+    // Enforce max length 17 (we pack into 9 regs = 18 chars space)
+    if (ethMac.length() > 17) ethMac = ethMac.substring(0, 17);
+    if (staMac.length() > 17) staMac = staMac.substring(0, 17);
+    if (apMac.length() > 17)  apMac = apMac.substring(0, 17);
+
+
+    //String staMac = WiFi.macAddress();
+    //String apMac  = WiFi.softAPmacAddress();
+    //String ethMac = (_eth) ? _eth->getMACAddressString() : String("");
+    // EFUSE base MAC (ESP32 unique MAC) formatted like espMacToString()
+    uint64_t efuse = ESP.getEfuseMac();
+    char ef[18];
+    snprintf(ef, sizeof(ef), "%02X:%02X:%02X:%02X:%02X:%02X",
+             (uint8_t)(efuse >> 40), (uint8_t)(efuse >> 32), (uint8_t)(efuse >> 24),
+             (uint8_t)(efuse >> 16), (uint8_t)(efuse >> 8), (uint8_t)(efuse));
+    String efuseMac = String(ef);
+
+
+    // Publish retained info topics (low frequency)
+    publish(topic("info/board"), board, true);
+    publish(topic("info/serial"), sn, true);
+    publish(topic("info/mfg"), mfg, true);
+    publish(topic("info/fw"), fw, true);
+    publish(topic("info/hw"), hw, true);
+    publish(topic("info/year"), year, true);
+    publish(topic("info/mac/sta"), staMac, true);
+    publish(topic("info/mac/ap"), apMac, true);
+    publish(topic("info/mac/efuse"), efuseMac, true);
+    if (ethMac.length() > 0) publish(topic("info/mac/eth"), ethMac, true);
+
+    // Also publish a compact JSON
+    String j = "{";
+    j += "\"board\":\"" + board + "\"";
+    j += ",\"serial\":\"" + sn + "\"";
+    j += ",\"mfg\":\"" + mfg + "\"";
+    j += ",\"fw\":\"" + fw + "\"";
+    j += ",\"hw\":\"" + hw + "\"";
+    j += ",\"year\":\"" + year + "\"";
+    j += ",\"mac\":{";
+    j += "\"sta\":\"" + staMac + "\",\"ap\":\"" + apMac + "\",\"efuse\":\"" + efuseMac + "\"";
+    if (ethMac.length() > 0) j += ",\"eth\":\"" + ethMac + "\"";
+    j += "}}";
+    publish(topic("info/json"), j, true);
+
+#else
+    (void)force;
+#endif
+}
+
 void MQTTManager::publishSnapshotJson(bool /*forceAll*/, bool retainedOverride) {
     String json = "{";
 
@@ -602,6 +708,12 @@ void MQTTManager::handleCommand(const String& leaf, const String& payload) {
     if (leaf == "ping") { cmdPing(); return; }
     if (leaf == "request/full") { cmdRequestFull(); return; }
 
+    if (leaf == "rtc/set") { cmdRtcSet(payload); return; }
+
+    if (leaf == "buzzer/beep") { cmdBuzzerBeepJson(payload); return; }
+    if (leaf == "buzzer/pattern") { cmdBuzzerPatternJson(payload); return; }
+    if (leaf == "buzzer/stop") { cmdBuzzerStop(); return; }
+
     if (leaf.startsWith("rel/")) {
         String core = leaf;
         if (core.endsWith("/set")) core = core.substring(0, core.length() - 4);
@@ -678,6 +790,89 @@ void MQTTManager::cmdDacRawSet(uint8_t ch1, uint16_t raw) {
 
 void MQTTManager::cmdRequestFull() {
     publishSnapshot(true);
+}
+
+
+// --- Tiny JSON helpers (very small, no ArduinoJson dependency) ---
+static long jsonGetLong(const String& s, const char* key, long defVal) {
+    // Looks for: "key":123 (spaces allowed)
+    String k = String("\"") + key + "\"";
+    int p = s.indexOf(k);
+    if (p < 0) return defVal;
+    p = s.indexOf(':', p + k.length());
+    if (p < 0) return defVal;
+    p++;
+    while (p < (int)s.length() && (s[p] == ' ' || s[p] == '\t')) p++;
+    // parse number (may be negative)
+    int e = p;
+    while (e < (int)s.length() && (isDigit(s[e]) || s[e] == '-')) e++;
+    String num = s.substring(p, e);
+    if (!num.length()) return defVal;
+    return num.toInt();
+}
+
+void MQTTManager::cmdRtcSet(const String& iso) {
+    if (!_rtc || !_rtc->isConnected()) {
+        publish(topic("resp/rtc/set"), "ERR:RTC_NOT_CONNECTED", false);
+        return;
+    }
+    bool ok = _rtc->setDateTimeFromString(iso.c_str());
+    publish(topic("resp/rtc/set"), ok ? "OK" : "ERR:BAD_FORMAT", false);
+    if (ok) {
+        publishRTC(true);
+        publishSnapshotJson(true, MQTT_RETAIN_SNAPSHOT);
+    }
+}
+
+void MQTTManager::cmdBuzzerBeepJson(const String& json) {
+    if (!_rtc || !_rtc->isConnected()) {
+        publish(topic("resp/buzzer/beep"), "ERR:RTC_NOT_CONNECTED", false);
+        return;
+    }
+    long freq = jsonGetLong(json, "freq", 2000);
+    long ms = jsonGetLong(json, "ms", 200);
+
+    if (freq < 50) freq = 50;
+    if (freq > 20000) freq = 20000;
+    if (ms < 10) ms = 10;
+    if (ms > 60000) ms = 60000;
+
+    _rtc->simpleBeep((uint16_t)freq, (uint32_t)ms);
+    publish(topic("resp/buzzer/beep"), "OK", false);
+}
+
+void MQTTManager::cmdBuzzerPatternJson(const String& json) {
+    if (!_rtc || !_rtc->isConnected()) {
+        publish(topic("resp/buzzer/pattern"), "ERR:RTC_NOT_CONNECTED", false);
+        return;
+    }
+    long freq = jsonGetLong(json, "freq", 2000);
+    long onMs = jsonGetLong(json, "on", 200);
+    long offMs = jsonGetLong(json, "off", 200);
+    long rep = jsonGetLong(json, "rep", 5);
+
+    if (freq < 50) freq = 50;
+    if (freq > 20000) freq = 20000;
+
+    if (onMs < 10) onMs = 10;
+    if (onMs > 60000) onMs = 60000;
+
+    if (offMs < 0) offMs = 0;
+    if (offMs > 60000) offMs = 60000;
+
+    if (rep < 1) rep = 1;
+    if (rep > 255) rep = 255;
+
+    _rtc->setAlarmPattern((uint16_t)freq, (uint16_t)onMs, (uint16_t)offMs, (uint8_t)rep);
+    _rtc->playAlarmPattern();
+
+    publish(topic("resp/buzzer/pattern"), "OK", false);
+}
+
+void MQTTManager::cmdBuzzerStop() {
+    if (!_rtc) return;
+    _rtc->stopBeep();
+    publish(topic("resp/buzzer/stop"), "OK", false);
 }
 
 String MQTTManager::trimCopy(const String& s) {
