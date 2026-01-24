@@ -1,6 +1,8 @@
 // App.cpp - main orchestrator split from original sketch
 #include "../FunctionPrototypes.h"
 #include "../comm/ModbusRtuManager.h"
+#include "../comm/BACnetDriver.h"
+#include "../comm/BACnetIntegration.h"
 #include <new>
 
 static void reinitWebPortsIfNeeded() {
@@ -114,6 +116,29 @@ void appSetup() {
         analogVoltages[i] = convertAnalogToVoltage(analogValues[i]);
     }
 
+    // Initialize BACnet/IP server on Ethernet/WiFi (BACnet over UDP/IP)
+    if ((WiFi.status() == WL_CONNECTED || ethConnected)) {
+        Serial.println("[App] Initializing BACnet/IP...");
+
+        // Start BACnet driver with Ethernet settings
+        if (bacnetDriver.begin(ip, gateway, subnet)) {
+            // Set device information from global variables
+            bacnetDriver.setDeviceName(deviceName.c_str());
+            bacnetDriver.setDescription("KC868-A16 Smart Controller");
+            bacnetDriver.setLocation("Building Automation");
+
+            // Enable BACnet integration
+            BACnetIntegration::initialize();
+            BACnetIntegration::setEnabled(true);
+
+            Serial.printf("[App] BACnet/IP started on %s:%d\n",
+                ip.toString().c_str(), bacnetDriver.getPort());
+        }
+        else {
+            Serial.println("[App] BACnet/IP initialization failed");
+        }
+    }
+
     // Initialize WebSocket client array
     for (int i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++) {
         webSocketClients[i] = false;
@@ -160,6 +185,10 @@ void appLoop() {
 
     // Handle WebSocket events
     webSocket.loop();
+
+
+    // Update BACnet
+    BACnetIntegration::update();
 
     // Static variables to track last updates
     static unsigned long lastWebSocketUpdate = 0;
